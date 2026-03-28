@@ -1,0 +1,51 @@
+{
+  "name": "browser-recorder",
+  "version": "1.0.0",
+  "description": "Chrome extension MVP to record API and page text interactions.",
+  "private": true,
+  "scripts": {
+    "build": "vite build && cp manifest.json dist/manifest.json",
+    "setup:browser": "npm run build && node scripts/setup-browser.mjs",
+    "dev": "vite build --watch",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier . --write",
+    "format:local": "prettier . --write && eslint . --fix",
+    "format:check": "prettier . --check",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gustavo-gardusi/browser-recorder.git"
+  },
+  "keywords": [
+    "chrome-extension",
+    "recorder",
+    "network"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/gustavo-gardusi/browser-recorder/issues"
+  },
+  "homepage": "https://github.com/gustavo-gardusi/browser-recorder#readme",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.1.38",
+    "@types/node": "^25.5.0",
+    "@vitest/coverage-v8": "^4.1.2",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.4.0",
+    "jsdom": "^29.0.1",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.2",
+    "vite": "^8.0.3",
+    "vitest": "^4.1.2"
+  }
+}

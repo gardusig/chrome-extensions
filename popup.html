@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recorder</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+        min-width: 360px;
+      }
+      .container {
+        display: grid;
+        gap: 8px;
+      }
+      .status {
+        font-size: 12px;
+        padding: 8px;
+        border-radius: 8px;
+        background: rgba(125, 125, 125, 0.15);
+      }
+      .stats {
+        font-size: 12px;
+        opacity: 0.9;
+      }
+      .settings {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        padding: 8px;
+        border-radius: 8px;
+        background: rgba(125, 125, 125, 0.1);
+      }
+      .settings button {
+        width: 100%;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      button {
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(125, 125, 125, 0.4);
+        cursor: pointer;
+      }
+      #export-btn,
+      #clear-btn {
+        grid-column: 1 / -1;
+      }
+      #message {
+        min-height: 18px;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h3>Recorder</h3>
+      <div id="status" class="status">Loading...</div>
+      <div id="stats" class="stats">Pages: 0 | Hosts: 0</div>
+      <div class="settings">
+        <div class="settings-row" style="display: block">
+          <div>Capture mode is configured in full settings.</div>
+        </div>
+        <div class="settings-row">
+          <button id="open-settings-btn" type="button">Open all settings</button>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="start-btn" type="button">Start</button>
+        <button id="stop-btn" type="button">Stop</button>
+        <button id="export-btn" type="button">Export Session</button>
+        <button id="clear-btn" type="button">Clear Session Data</button>
+      </div>
+      <div id="message"></div>
+    </div>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>

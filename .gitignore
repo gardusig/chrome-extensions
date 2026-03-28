@@ -14,6 +14,13 @@
 
 # production
 /build
+/dist
+/recordings/*
+!/recordings/.gitkeep
+# Explicit recording export artifact extensions
+/recordings/**/*.json
+/recordings/**/*.jsonl
+/recordings/**/*.txt
 
 # misc
 .DS_Store

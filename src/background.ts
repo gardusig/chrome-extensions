@@ -27,6 +27,7 @@ import {
   type PipelineStats,
   type RecorderState,
   type RecorderSettings,
+  type SemanticCaptureLevel,
   type SessionStats,
 } from "./lib/schema";
 
@@ -60,6 +61,7 @@ const DEFAULT_SETTINGS: RecorderSettings = {
   autoExportOnSoftLimit: false,
   pollIntervalMs: 100,
   forceInitialScanOnStart: false,
+  semanticCaptureLevel: "minimal",
   savePageText: true,
   savePageHtml: false,
   saveRequestData: false,
@@ -100,11 +102,19 @@ function normalizeState(state: RecorderState | undefined): RecorderState {
 }
 
 function normalizeSettings(settings: RecorderSettings | undefined): RecorderSettings {
+  const semanticCaptureLevel = settings?.semanticCaptureLevel;
+  const normalizedSemanticCaptureLevel: SemanticCaptureLevel =
+    semanticCaptureLevel === "off" ||
+    semanticCaptureLevel === "minimal" ||
+    semanticCaptureLevel === "full"
+      ? semanticCaptureLevel
+      : DEFAULT_SETTINGS.semanticCaptureLevel;
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
     hardLimitMb: Math.min(Math.max(Math.round(settings?.hardLimitMb ?? 32), 32), MAX_HARD_LIMIT_MB),
     pollIntervalMs: Math.min(Math.max(Math.round(settings?.pollIntervalMs ?? 100), 100), 5_000),
+    semanticCaptureLevel: normalizedSemanticCaptureLevel,
   };
 }
 
@@ -252,6 +262,7 @@ async function pushSettingsToOpenTabs(): Promise<void> {
           payload: {
             pollIntervalMs: recorderSettings.pollIntervalMs,
             savePageHtml: recorderSettings.savePageHtml,
+            semanticCaptureLevel: recorderSettings.semanticCaptureLevel,
           },
         }),
       ),
@@ -464,7 +475,18 @@ type ExportMetadata = {
   };
   websites: WebsiteSummary[];
   indexText: string;
+  compaction: {
+    semanticChunksRaw: number;
+    semanticChunksOmitted: number;
+    snapshotsCompacted: number;
+  };
   settings: RecorderSettings;
+};
+
+type ExportCompactionStats = {
+  semanticChunksRaw: number;
+  semanticChunksOmitted: number;
+  snapshotsCompacted: number;
 };
 
 function toTimestampMs(value: string): number | null {
@@ -613,9 +635,10 @@ function buildExportMetadata(params: {
   pageCount: number;
   summary: SessionSummary;
   indexText: string;
+  compaction: ExportCompactionStats;
   settings: RecorderSettings;
 }): ExportMetadata {
-  const { sessionId, exportedAt, pageCount, summary, indexText, settings } = params;
+  const { sessionId, exportedAt, pageCount, summary, indexText, compaction, settings } = params;
   return {
     sessionId,
     exportedAt,
@@ -631,12 +654,76 @@ function buildExportMetadata(params: {
     },
     websites: summary.websites,
     indexText,
+    compaction,
     settings,
   };
 }
 
-function buildPrefixPageTextBlocks(pages: EnrichedPageRecord[]): string {
-  return pages
+function splitSnapshotTextChunks(textContent: string): {
+  semanticChunks: string[];
+  nonSemanticChunks: string[];
+} {
+  const semanticChunks: string[] = [];
+  const nonSemanticChunks: string[] = [];
+  for (const chunk of textContent.split(/\n{2,}/)) {
+    const normalized = chunk.trim();
+    if (!normalized) {
+      continue;
+    }
+    if (normalized.startsWith("[source=semantic ")) {
+      semanticChunks.push(normalized);
+      continue;
+    }
+    nonSemanticChunks.push(normalized);
+  }
+  return {
+    semanticChunks,
+    nonSemanticChunks,
+  };
+}
+
+function compactSnapshotText(
+  textContent: string,
+  previousSemanticSignature: string | null,
+): { textContent: string; semanticSignature: string | null; omittedSemanticChunks: number } {
+  const { semanticChunks, nonSemanticChunks } = splitSnapshotTextChunks(textContent);
+  if (semanticChunks.length === 0) {
+    return {
+      textContent,
+      semanticSignature: null,
+      omittedSemanticChunks: 0,
+    };
+  }
+  const semanticSignature = semanticChunks.join("\n\n");
+  if (previousSemanticSignature === semanticSignature) {
+    const base = nonSemanticChunks.join("\n\n").trim();
+    return {
+      textContent:
+        base.length > 0
+          ? `${base}\n\n[source=semantic selector=__compacted__ kind=info]\n<unchanged-from-previous-snapshot>`
+          : "[source=semantic selector=__compacted__ kind=info]\n<unchanged-from-previous-snapshot>",
+      semanticSignature,
+      omittedSemanticChunks: semanticChunks.length,
+    };
+  }
+  return {
+    textContent,
+    semanticSignature,
+    omittedSemanticChunks: 0,
+  };
+}
+
+function buildPrefixPageTextBlocks(params: { pages: EnrichedPageRecord[] }): {
+  content: string;
+  stats: ExportCompactionStats;
+} {
+  let previousSemanticSignature: string | null = null;
+  const stats: ExportCompactionStats = {
+    semanticChunksRaw: 0,
+    semanticChunksOmitted: 0,
+    snapshotsCompacted: 0,
+  };
+  const content = params.pages
     .sort((a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp))
     .map((page) => {
       const lines: string[] = [
@@ -649,8 +736,23 @@ function buildPrefixPageTextBlocks(pages: EnrichedPageRecord[]): string {
         `windowId: ${page.windowId}`,
         "content:",
       ];
-      const content = (page.textContent ?? "").trim();
-      lines.push(content.length > 0 ? content : "<empty>");
+      const rawContent = (page.textContent ?? "").trim();
+      let pageContent = rawContent;
+      if (rawContent.length > 0) {
+        const split = splitSnapshotTextChunks(rawContent);
+        stats.semanticChunksRaw += split.semanticChunks.length;
+        const compacted = compactSnapshotText(rawContent, previousSemanticSignature);
+        pageContent = compacted.textContent;
+        if (compacted.omittedSemanticChunks > 0) {
+          stats.semanticChunksOmitted += compacted.omittedSemanticChunks;
+          stats.snapshotsCompacted += 1;
+        }
+        previousSemanticSignature = compacted.semanticSignature;
+      } else {
+        previousSemanticSignature = null;
+      }
+
+      lines.push(pageContent.length > 0 ? pageContent : "<empty>");
       if (page.htmlContent) {
         lines.push("htmlContent:");
         lines.push(page.htmlContent);
@@ -658,6 +760,10 @@ function buildPrefixPageTextBlocks(pages: EnrichedPageRecord[]): string {
       return lines.join("\n");
     })
     .join("\n\n");
+  return {
+    content,
+    stats,
+  };
 }
 
 function hashForPath(value: string): string {
@@ -689,9 +795,10 @@ function buildSafeUrlBasenameMap(urls: string[]): Map<string, string> {
   return safeNames;
 }
 
-function buildUrlTextEntries(
-  pages: EnrichedPageRecord[],
-): Array<{ filename: string; content: string }> {
+function buildUrlTextEntriesWithCompaction(pages: EnrichedPageRecord[]): {
+  entries: Array<{ filename: string; content: string }>;
+  compaction: ExportCompactionStats;
+} {
   const byPrefix = new Map<string, Map<string, EnrichedPageRecord[]>>();
   for (const page of pages) {
     const key = page.urlPrefix || "unknown";
@@ -703,6 +810,11 @@ function buildUrlTextEntries(
     byPrefix.set(key, byUrl);
   }
   const entries: Array<{ filename: string; content: string }> = [];
+  const compaction: ExportCompactionStats = {
+    semanticChunksRaw: 0,
+    semanticChunksOmitted: 0,
+    snapshotsCompacted: 0,
+  };
   const sortedPrefixes = [...byPrefix.entries()].sort(([a], [b]) => a.localeCompare(b));
   for (const [prefix, byUrl] of sortedPrefixes) {
     const safePrefix = sanitizeZipPathPart(prefix);
@@ -710,13 +822,23 @@ function buildUrlTextEntries(
     const safeNames = buildSafeUrlBasenameMap(urls);
     const sortedUrls = [...urls].sort((a, b) => a.localeCompare(b));
     for (const url of sortedUrls) {
+      const pageText = buildPrefixPageTextBlocks({ pages: byUrl.get(url) ?? [] });
+      compaction.semanticChunksRaw += pageText.stats.semanticChunksRaw;
+      compaction.semanticChunksOmitted += pageText.stats.semanticChunksOmitted;
+      compaction.snapshotsCompacted += pageText.stats.snapshotsCompacted;
       entries.push({
         filename: `pages/${safePrefix}/${safeNames.get(url)}.txt`,
-        content: buildPrefixPageTextBlocks(byUrl.get(url) ?? []),
+        content: pageText.content,
       });
     }
   }
-  return entries;
+  return { entries, compaction };
+}
+
+function buildUrlTextEntries(
+  pages: EnrichedPageRecord[],
+): Array<{ filename: string; content: string }> {
+  return buildUrlTextEntriesWithCompaction(pages).entries;
 }
 
 async function handleStartRecording(): Promise<RecorderState> {
@@ -838,7 +960,7 @@ async function handleExportSession(): Promise<{
   }
   activeExportSessions.add(sessionId);
   try {
-    const urlEntries = buildUrlTextEntries(pages);
+    const { entries: urlEntries, compaction } = buildUrlTextEntriesWithCompaction(pages);
     const exportedAt = new Date().toISOString();
     const summary = buildSessionSummary(pages);
     const indexText = buildSessionIndexText(summary, sessionId, exportedAt);
@@ -848,6 +970,7 @@ async function handleExportSession(): Promise<{
       pageCount: pages.length,
       summary,
       indexText,
+      compaction,
       settings: recorderSettings,
     });
     const metadata = JSON.stringify(exportMetadata, null, 2);
@@ -1011,6 +1134,7 @@ export const __testHooks = {
   buildExportMetadata,
   buildPrefixPageTextBlocks,
   buildUrlTextEntries,
+  buildUrlTextEntriesWithCompaction,
   handleGetSessionStats,
   handleGetHostQueueStats,
   handleExportSession,

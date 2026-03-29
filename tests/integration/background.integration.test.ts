@@ -100,6 +100,7 @@ function withSettings(overrides: Record<string, unknown> = {}): Record<string, u
     autoExportOnSoftLimit: false,
     pollIntervalMs: 100,
     forceInitialScanOnStart: false,
+    semanticCaptureLevel: "minimal",
     savePageText: true,
     savePageHtml: false,
     saveRequestData: false,
@@ -284,6 +285,75 @@ describe("background integration", () => {
         preset: "full_capture",
         savePageHtml: true,
       }),
+    });
+  });
+
+  it("compacts repeated semantic chunks in exported page text", async () => {
+    const chromeMock = await loadBackground({
+      [STORAGE_KEYS.state]: withState(),
+      [STORAGE_KEYS.settings]: withSettings(),
+    });
+    const downloadSpy = vi.spyOn(chromeMock.downloads, "download");
+    vi.spyOn(chromeMock.tabs, "query").mockImplementation(async () => []);
+
+    await startRecording(chromeMock);
+    await sendSnapshot(
+      chromeMock,
+      {
+        url: "https://example.com/dashboard",
+        title: "Dashboard",
+        reason: "pagehide",
+        textContent: [
+          "[source=body selector=body]",
+          "Main content 1",
+          "",
+          "[source=semantic selector=button kind=aria-label]",
+          "Save changes",
+        ].join("\n"),
+      },
+      17,
+    );
+    await sendSnapshot(
+      chromeMock,
+      {
+        url: "https://example.com/dashboard",
+        title: "Dashboard",
+        reason: "pagehide",
+        textContent: [
+          "[source=body selector=body]",
+          "Main content 2",
+          "",
+          "[source=semantic selector=button kind=aria-label]",
+          "Save changes",
+        ].join("\n"),
+      },
+      17,
+    );
+    await stopRecording(chromeMock);
+
+    const exportResponse = (await dispatchMessage(chromeMock, {
+      type: "EXPORT_SESSION",
+    })) as { ok: boolean };
+    expect(exportResponse.ok).toBe(true);
+    expect(downloadSpy).toHaveBeenCalledTimes(1);
+
+    const downloadArgs = downloadSpy.mock.calls[0]?.[0];
+    const zipBytes = decodeDataUrlBytes(downloadArgs.url);
+    const entries = parseStoredZipEntries(zipBytes);
+    const pageEntryName = [...entries.keys()].find(
+      (name) => name.startsWith("pages/") && name.endsWith(".txt"),
+    );
+    expect(pageEntryName).toBeDefined();
+    const pageEntry = entries.get(pageEntryName!);
+    expect(pageEntry).toContain("Main content 1");
+    expect(pageEntry).toContain("Main content 2");
+    expect(pageEntry).toContain("<unchanged-from-previous-snapshot>");
+
+    const metadata = JSON.parse(entries.get("metadata.json") ?? "{}");
+    expect(metadata.compaction).toMatchObject({
+      semanticChunksRaw: 2,
+      semanticChunksOmitted: 1,
+      snapshotsCompacted: 1,
     });
   });
 

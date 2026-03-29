@@ -17,6 +17,7 @@ describe("exportSessionRecords integration", () => {
       autoExportOnSoftLimit: false,
       pollIntervalMs: 350,
       forceInitialScanOnStart: true,
+      semanticCaptureLevel: "minimal",
       savePageText: true,
       savePageHtml: true,
       saveRequestData: true,

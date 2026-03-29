@@ -10,6 +10,10 @@ Zip entries:
 - `metadata.json` (session/export metadata)
 
 Within each page file, snapshots are sorted by `timestamp` (oldest first).
+When adjacent snapshots repeat the same semantic chunk set, export compacts the repeated semantic section to:
+
+- `[source=semantic selector=__compacted__ kind=info]`
+- `<unchanged-from-previous-snapshot>`
 
 ## Page Text Entry Format
 
@@ -38,6 +42,7 @@ URL query params containing sensitive key names are redacted as `[REDACTED]` in 
 - `summary` (counts + start/end/duration)
 - `websites` (per-prefix aggregate stats with nested per-URL aggregates)
 - `indexText`
+- `compaction` (`semanticChunksRaw`, `semanticChunksOmitted`, `snapshotsCompacted`)
 - `settings` (effective recorder settings at export time)
 
 ## MVP Constraints

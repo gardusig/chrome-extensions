@@ -92,6 +92,7 @@ export type PipelineStats = {
 };
 
 export type CapturePreset = "pages_only" | "pages_requests" | "full_capture";
+export type SemanticCaptureLevel = "off" | "minimal" | "full";
 
 export type RecorderSettings = {
   preset: CapturePreset;
@@ -99,6 +100,7 @@ export type RecorderSettings = {
   autoExportOnSoftLimit: boolean;
   pollIntervalMs: number;
   forceInitialScanOnStart: boolean;
+  semanticCaptureLevel: SemanticCaptureLevel;
   savePageText: boolean;
   savePageHtml: boolean;
   saveRequestData: boolean;

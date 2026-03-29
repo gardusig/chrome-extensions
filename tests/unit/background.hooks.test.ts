@@ -266,6 +266,54 @@ describe("background test hooks", () => {
     expect(content).toContain("content:\nthird");
   });
 
+  it("omits repeated semantic chunks in compacted export output", async () => {
+    const { module } = await loadBackgroundWithHooks();
+    const hooks = module.__testHooks;
+
+    const result = hooks.buildUrlTextEntriesWithCompaction([
+      {
+        id: "a",
+        createdAt: "2026-03-28T10:00:01.000Z",
+        tabId: 4,
+        windowId: 1,
+        url: "https://example.com/page",
+        urlPrefix: "example.com",
+        title: "Example",
+        reason: "pagehide",
+        timestamp: "2026-03-28T10:00:01.000Z",
+        textContent:
+          "[source=body selector=body]\nBody one\n\n[source=semantic selector=button kind=aria-label]\nSave",
+        signatureHash: 1,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+      {
+        id: "b",
+        createdAt: "2026-03-28T10:00:02.000Z",
+        tabId: 4,
+        windowId: 1,
+        url: "https://example.com/page",
+        urlPrefix: "example.com",
+        title: "Example",
+        reason: "pagehide",
+        timestamp: "2026-03-28T10:00:02.000Z",
+        textContent:
+          "[source=body selector=body]\nBody two\n\n[source=semantic selector=button kind=aria-label]\nSave",
+        signatureHash: 2,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+    ]);
+
+    expect(result.compaction).toEqual({
+      semanticChunksRaw: 2,
+      semanticChunksOmitted: 1,
+      snapshotsCompacted: 1,
+    });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].content).toContain("<unchanged-from-previous-snapshot>");
+  });
+
   it("builds session index summary with host/page durations", async () => {
     const { module } = await loadBackgroundWithHooks();
     const hooks = module.__testHooks;
@@ -378,12 +426,18 @@ describe("background test hooks", () => {
       pageCount: 1,
       summary,
       indexText,
+      compaction: {
+        semanticChunksRaw: 1,
+        semanticChunksOmitted: 0,
+        snapshotsCompacted: 0,
+      },
       settings: {
         preset: "pages_only",
         hardLimitMb: 256,
         autoExportOnSoftLimit: false,
         pollIntervalMs: 100,
         forceInitialScanOnStart: false,
+        semanticCaptureLevel: "minimal",
         savePageText: true,
         savePageHtml: false,
         saveRequestData: false,
@@ -405,12 +459,18 @@ describe("background test hooks", () => {
         durationSeconds: 0,
       },
       indexText,
+      compaction: {
+        semanticChunksRaw: 1,
+        semanticChunksOmitted: 0,
+        snapshotsCompacted: 0,
+      },
       settings: {
         preset: "pages_only",
         hardLimitMb: 256,
         autoExportOnSoftLimit: false,
         pollIntervalMs: 100,
         forceInitialScanOnStart: false,
+        semanticCaptureLevel: "minimal",
         savePageText: true,
         savePageHtml: false,
         saveRequestData: false,

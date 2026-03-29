@@ -13,6 +13,11 @@ async function flushMicrotasks(): Promise<void> {
 function mountOptionsDom(): void {
   document.body.innerHTML = `
     <input id="save-page-text" type="checkbox" />
+    <select id="semantic-capture-level">
+      <option value="off">off</option>
+      <option value="minimal">minimal</option>
+      <option value="full">full</option>
+    </select>
     <input id="save-page-html" type="checkbox" />
     <input id="save-request-data" type="checkbox" />
     <input id="save-page-meta" type="checkbox" />
@@ -50,6 +55,7 @@ describe("options", () => {
       autoExportOnSoftLimit: false,
       pollIntervalMs: 350,
       forceInitialScanOnStart: false,
+      semanticCaptureLevel: "minimal",
       savePageText: true,
       savePageHtml: false,
       saveRequestData: false,
@@ -95,6 +101,12 @@ describe("options", () => {
     savePageHtmlEl.dispatchEvent(new Event("change"));
     await flushMicrotasks();
     expect(savePageHtmlEl.checked).toBe(true);
+
+    const semanticLevelEl = document.querySelector("#semantic-capture-level") as HTMLSelectElement;
+    semanticLevelEl.value = "full";
+    semanticLevelEl.dispatchEvent(new Event("change"));
+    await flushMicrotasks();
+    expect(semanticLevelEl.value).toBe("full");
   });
 
   it("handles persistence failures, clamp logic, presets, and unload cleanup", async () => {
@@ -104,6 +116,7 @@ describe("options", () => {
       autoExportOnSoftLimit: false,
       pollIntervalMs: 350,
       forceInitialScanOnStart: false,
+      semanticCaptureLevel: "minimal",
       savePageText: true,
       savePageHtml: true,
       saveRequestData: true,

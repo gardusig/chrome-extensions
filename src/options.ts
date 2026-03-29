@@ -6,6 +6,7 @@ type BackgroundResponse<T = unknown> = {
 } & T;
 
 const savePageTextEl = document.querySelector<HTMLInputElement>("#save-page-text");
+const semanticCaptureLevelEl = document.querySelector<HTMLSelectElement>("#semantic-capture-level");
 const savePageHtmlEl = document.querySelector<HTMLInputElement>("#save-page-html");
 const saveRequestDataEl = document.querySelector<HTMLInputElement>("#save-request-data");
 const savePageMetaEl = document.querySelector<HTMLInputElement>("#save-page-meta");
@@ -28,6 +29,7 @@ let diagnosticsPollTimer: number | null = null;
 function assertElements(): void {
   if (
     !savePageTextEl ||
+    !semanticCaptureLevelEl ||
     !savePageHtmlEl ||
     !saveRequestDataEl ||
     !savePageMetaEl ||
@@ -100,6 +102,7 @@ async function sendMessage<T = unknown>(type: string): Promise<BackgroundRespons
 
 function renderSettings(settings: RecorderSettings): void {
   savePageTextEl!.checked = settings.savePageText;
+  semanticCaptureLevelEl!.value = settings.semanticCaptureLevel;
   savePageHtmlEl!.checked = settings.savePageHtml;
   saveRequestDataEl!.checked = settings.saveRequestData;
   savePageMetaEl!.checked = settings.savePageMeta;
@@ -167,6 +170,7 @@ function currentSettingsFromInputs(): RecorderSettings {
     pollIntervalMs: Number(pollIntervalEl!.value),
     forceInitialScanOnStart: forceInitialScanEl!.checked,
     savePageText: savePageTextEl!.checked,
+    semanticCaptureLevel: semanticCaptureLevelEl!.value as RecorderSettings["semanticCaptureLevel"],
     savePageHtml: savePageHtmlEl!.checked,
     saveRequestData: saveRequestDataEl!.checked,
     savePageMeta: savePageMetaEl!.checked,
@@ -180,6 +184,10 @@ function currentSettingsFromInputs(): RecorderSettings {
 function bindEvents(): void {
   savePageTextEl!.addEventListener("change", () => {
     void persist({ savePageText: savePageTextEl!.checked }, "Saved page text setting.");
+  });
+  semanticCaptureLevelEl!.addEventListener("change", () => {
+    const level = semanticCaptureLevelEl!.value as RecorderSettings["semanticCaptureLevel"];
+    void persist({ semanticCaptureLevel: level }, "Saved semantic capture setting.");
   });
   savePageHtmlEl!.addEventListener("change", () => {
     void persist({ savePageHtml: savePageHtmlEl!.checked }, "Saved page HTML setting.");

@@ -91,10 +91,11 @@ npm run format:local
 - Recorder enforces a hard size limit and drops new snapshots once the limit is reached.
 - Popup offers short capture presets (`Pages only`, `Pages + requests`, `Full capture`).
 - Popup has **Open all settings** for advanced filters and hard-limit options (`32/64/128/256/512/1024 MB`, default `32 MB`).
+- Advanced settings include semantic label capture level (`Off`, `Minimal`, `Full`; default `Minimal`) to reduce generic UI noise.
 - Export creates a zip in Downloads as `recordings/<sessionId>.zip`.
 - Zip contents include:
   - `pages/<urlPrefix>/<safeUrlBasename>.txt` (chronological structured text blocks, one file per full URL nested under prefix folders)
-  - `metadata.json` (session id, export timestamp, counts including `urlCount`, summary, per-website stats, embedded `indexText`, settings)
+  - `metadata.json` (session id, export timestamp, counts including `urlCount`, summary, per-website stats, embedded `indexText`, export compaction stats, settings)
 - `src/lib/export.ts` contains an alternate export schema used by dedicated export tests; popup `Export Session` uses the `background.ts` zip contract above.
 - Repository includes `recordings/.gitkeep` to reserve a local recordings folder for future shared tooling.
 

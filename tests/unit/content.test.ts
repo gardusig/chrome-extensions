@@ -48,7 +48,10 @@ describe("content script", () => {
       .spyOn(chromeMock.runtime, "sendMessage")
       .mockImplementation(async (message: unknown) => {
         if ((message as { type?: string }).type === "GET_SETTINGS") {
-          return { ok: true, settings: { pollIntervalMs: 300, savePageHtml: true } };
+          return {
+            ok: true,
+            settings: { pollIntervalMs: 300, savePageHtml: true, semanticCaptureLevel: "minimal" },
+          };
         }
         return { ok: true };
       });
@@ -104,7 +107,10 @@ describe("content script", () => {
         firstCall = false;
         throw new Error("worker unavailable");
       }
-      return { ok: true, settings: { pollIntervalMs: 120, savePageHtml: true } };
+      return {
+        ok: true,
+        settings: { pollIntervalMs: 120, savePageHtml: true, semanticCaptureLevel: "minimal" },
+      };
     });
 
     globalThis.chrome = chromeMock;
@@ -136,7 +142,7 @@ describe("content script", () => {
     const chromeMock = createChromeMock() as ChromeMockWithInternals;
     vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async () => ({
       ok: true,
-      settings: { pollIntervalMs: 300, savePageHtml: false },
+      settings: { pollIntervalMs: 300, savePageHtml: false, semanticCaptureLevel: "minimal" },
     }));
     globalThis.chrome = chromeMock;
 
@@ -167,7 +173,10 @@ describe("content script", () => {
     vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async (message: unknown) => {
       const typed = message as { type?: string; payload?: { textContent?: string } };
       if (typed.type === "GET_SETTINGS") {
-        return { ok: true, settings: { pollIntervalMs: 100, savePageHtml: false } };
+        return {
+          ok: true,
+          settings: { pollIntervalMs: 100, savePageHtml: false, semanticCaptureLevel: "full" },
+        };
       }
       sentMessages.push(typed);
       return { ok: true };
@@ -220,7 +229,10 @@ describe("content script", () => {
     vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async (message: unknown) => {
       const typed = message as { type?: string; payload?: { textContent?: string } };
       if (typed.type === "GET_SETTINGS") {
-        return { ok: true, settings: { pollIntervalMs: 100, savePageHtml: false } };
+        return {
+          ok: true,
+          settings: { pollIntervalMs: 100, savePageHtml: false, semanticCaptureLevel: "minimal" },
+        };
       }
       sentMessages.push(typed);
       return { ok: true };
@@ -247,5 +259,64 @@ describe("content script", () => {
 
     const snapshot = sentMessages.find((item) => item.type === "CONTENT_PAGE_SNAPSHOT");
     expect(snapshot?.payload?.textContent ?? "").toContain("body only");
+  });
+
+  it("supports semantic level off and filters generic labels in minimal mode", async () => {
+    const chromeMock = createChromeMock() as ChromeMockWithInternals;
+    const sentMessages: Array<{ type?: string; payload?: { textContent?: string } }> = [];
+    vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async (message: unknown) => {
+      const typed = message as { type?: string; payload?: { textContent?: string } };
+      if (typed.type === "GET_SETTINGS") {
+        return {
+          ok: true,
+          settings: { pollIntervalMs: 100, savePageHtml: false, semanticCaptureLevel: "minimal" },
+        };
+      }
+      sentMessages.push(typed);
+      return { ok: true };
+    });
+    globalThis.chrome = chromeMock;
+
+    document.body.innerHTML = `
+      <button aria-label="Close">x</button>
+      <button aria-label="Submit order">Checkout</button>
+    `;
+    Object.defineProperty(document.body, "innerText", {
+      configurable: true,
+      get: () => "body text",
+    });
+
+    window.__recorderContentBootstrapped = undefined;
+    vi.resetModules();
+    await import("../../src/content.ts");
+    vi.advanceTimersByTime(120);
+
+    const listener = chromeMock.__runtimeListeners.at(-1)!;
+    await new Promise<unknown>((resolve) => {
+      listener(
+        {
+          type: "CONTENT_UPDATE_SETTINGS",
+          payload: { semanticCaptureLevel: "off" },
+        },
+        {},
+        (response) => resolve(response),
+      );
+    });
+    await new Promise<unknown>((resolve) => {
+      listener(
+        { type: "CAPTURE_NOW", payload: { reason: "manual", force: true } },
+        {},
+        (response) => resolve(response),
+      );
+    });
+
+    const snapshots = sentMessages.filter((item) => item.type === "CONTENT_PAGE_SNAPSHOT");
+    const minimalText = snapshots[0]?.payload?.textContent ?? "";
+    expect(minimalText).toContain("Submit order");
+    expect(minimalText).not.toContain("Close");
+
+    const offText = snapshots.at(-1)?.payload?.textContent ?? "";
+    expect(offText).toContain("[source=body selector=body]");
+    expect(offText).not.toContain("[source=semantic");
   });
 });

@@ -22,6 +22,7 @@ describe("exportSessionRecords integration", () => {
       savePageHtml: true,
       saveRequestData: true,
       savePageMeta: true,
+      saveExportMetadata: false,
     };
 
     const pages: PageSnapshotRecord[] = [

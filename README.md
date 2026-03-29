@@ -94,8 +94,8 @@ npm run format:local
 - Advanced settings include semantic label capture level (`Off`, `Minimal`, `Full`; default `Minimal`) to reduce generic UI noise.
 - Export creates a zip in Downloads as `recordings/<sessionId>.zip`.
 - Zip contents include:
-  - `pages/<urlPrefix>/<safeUrlBasename>.txt` (chronological structured text blocks, one file per full URL nested under prefix folders)
-  - `metadata.json` (session id, export timestamp, counts including `urlCount`, summary, per-website stats, embedded `indexText`, export compaction stats, settings)
+  - `pages/<urlPrefix>/<safeUrlBasename>.txt` (per-URL file with page-level index header plus content-only snapshot blocks and separators)
+  - optional `metadata.json` when **Include metadata.json in zip export** is enabled (session id, export timestamp, counts including `urlCount`, summary, per-website stats, structured `index`, export compaction stats, settings)
 - `src/lib/export.ts` contains an alternate export schema used by dedicated export tests; popup `Export Session` uses the `background.ts` zip contract above.
 - Repository includes `recordings/.gitkeep` to reserve a local recordings folder for future shared tooling.
 

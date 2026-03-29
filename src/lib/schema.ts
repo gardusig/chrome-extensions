@@ -105,6 +105,7 @@ export type RecorderSettings = {
   savePageHtml: boolean;
   saveRequestData: boolean;
   savePageMeta: boolean;
+  saveExportMetadata: boolean;
 };
 
 export type ExportMessage =

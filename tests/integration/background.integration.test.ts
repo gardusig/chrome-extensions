@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS, type RecorderState } from "../../src/lib/schema";
+import { transformHtmlToIndentedText } from "../../src/lib/html-textify";
 import { createChromeMock } from "../support/chrome-mocks";
 
 type ChromeMockWithInternals = typeof chrome & {
@@ -78,6 +79,23 @@ function parseStoredZipEntries(bytes: Uint8Array): Map<string, string> {
   return entries;
 }
 
+function findExportedPageContentByUrl(entries: Map<string, string>, url: string): string {
+  const pageEntries = [...entries.entries()].filter(
+    ([name]) => name.startsWith("pages/") && name.endsWith(".txt"),
+  );
+  const match = pageEntries.find(([, content]) => content.includes(`url: ${url}`));
+  if (!match) {
+    throw new Error(`No exported page file found for URL: ${url}`);
+  }
+  return match[1];
+}
+
+function expectHtmlProjection(pageContent: string, sourceHtml: string): void {
+  const expectedProjection = transformHtmlToIndentedText(sourceHtml);
+  expect(pageContent).toContain("htmlContent:");
+  expect(pageContent).toContain(`htmlContent:\n${expectedProjection}`);
+}
+
 const DEFAULT_STATE: RecorderState = {
   isRecording: false,
   isStopping: false,
@@ -105,6 +123,7 @@ function withSettings(overrides: Record<string, unknown> = {}): Record<string, u
     savePageHtml: false,
     saveRequestData: false,
     savePageMeta: true,
+    saveExportMetadata: false,
     ...overrides,
   };
 }
@@ -212,6 +231,7 @@ describe("background integration", () => {
         hardLimitMb: 8,
         pollIntervalMs: 350,
         savePageHtml: true,
+        saveExportMetadata: true,
       }),
     });
 
@@ -228,7 +248,7 @@ describe("background integration", () => {
         url: "https://app.slack.com/client/T1",
         title: "Slack",
         textContent: "channel content",
-        htmlContent: "<html><body>Slack</body></html>",
+        htmlContent: "<html><body><div>Slack<div>Inner</div>Tail</div></body></html>",
         reason: "test",
       },
       11,
@@ -266,9 +286,20 @@ describe("background integration", () => {
     );
     expect(pageEntryName).toBeDefined();
     const pageEntry = entries.get(pageEntryName!);
+    expect(pageEntry).toBeDefined();
+    if (!pageEntry) {
+      throw new Error("Expected exported page entry content");
+    }
     expect(pageEntry).toContain("---");
-    expect(pageEntry).toContain("reason: test");
+    expect(pageEntry).toContain("# Page Index");
+    expect(pageEntry).toContain("url: https://app.slack.com/client/T1");
+    expect(pageEntry).toContain("snapshotCount: 1");
     expect(pageEntry).toContain("content:");
+    expectHtmlProjection(pageEntry, "<html><body><div>Slack<div>Inner</div>Tail</div></body></html>");
+    expect(pageEntry).not.toContain("reason:");
+    expect(pageEntry).not.toContain("timestamp:");
+    expect(pageEntry).not.toContain("tabId:");
+    expect(pageEntry).not.toContain("windowId:");
 
     const metadataRaw = entries.get("metadata.json");
     expect(metadataRaw).toBeDefined();
@@ -285,13 +316,18 @@ describe("background integration", () => {
         preset: "full_capture",
         savePageHtml: true,
       }),
+      index: expect.objectContaining({
+        websitesOpened: 1,
+        urlsCaptured: 1,
+      }),
     });
+    expect(metadata.indexText).toBeUndefined();
   });
 
   it("compacts repeated semantic chunks in exported page text", async () => {
     const chromeMock = await loadBackground({
       [STORAGE_KEYS.state]: withState(),
-      [STORAGE_KEYS.settings]: withSettings(),
+      [STORAGE_KEYS.settings]: withSettings({ saveExportMetadata: true }),
     });
     const downloadSpy = vi.spyOn(chromeMock.downloads, "download");
     vi.spyOn(chromeMock.tabs, "query").mockImplementation(async () => []);
@@ -355,6 +391,189 @@ describe("background integration", () => {
       semanticChunksOmitted: 1,
       snapshotsCompacted: 1,
     });
+  });
+
+  it("exports realistic slack, github, and jira page examples", async () => {
+    const chromeMock = await loadBackground({
+      [STORAGE_KEYS.state]: withState(),
+      [STORAGE_KEYS.settings]: withSettings({
+        preset: "full_capture",
+        savePageHtml: true,
+        saveExportMetadata: false,
+      }),
+    });
+    const downloadSpy = vi.spyOn(chromeMock.downloads, "download");
+    vi.spyOn(chromeMock.tabs, "query").mockImplementation(async () => []);
+
+    await startRecording(chromeMock);
+
+    const snapshots = [
+      {
+        url: "https://app.slack.com/client/T123/C456",
+        title: "engineering (Channel) - Slack",
+        textContent: "Slack channel timeline example",
+        htmlContent: "<html><body><div>Channel<div>Message list</div></div></body></html>",
+        reason: "poll-diff",
+        tabId: 101,
+      },
+      {
+        url: "https://app.slack.com/client/T123/D789",
+        title: "Alex (Direct message) - Slack",
+        textContent: "Slack direct message example",
+        htmlContent: "<html><body><div>DM<div>Conversation pane</div></div></body></html>",
+        reason: "poll-diff",
+        tabId: 102,
+      },
+      {
+        url: "https://app.slack.com/client/T123/C456/thread/C456-1711111111.000200",
+        title: "Thread reply - Slack",
+        textContent: "Slack thread example",
+        htmlContent: "<html><body><div>Thread<div>Replies</div></div></body></html>",
+        reason: "pagehide",
+        tabId: 103,
+      },
+      {
+        url: "https://github.com/org/repo/pull/123#issuecomment-987654321",
+        title: "PR comments · org/repo",
+        textContent: "GitHub PR comment timeline",
+        htmlContent: "<html><body><div>PR comments<div>Review note</div></div></body></html>",
+        reason: "poll-diff",
+        tabId: 201,
+      },
+      {
+        url: "https://github.com/org/repo/pull/123/checks",
+        title: "Checks · org/repo",
+        textContent: "GitHub checks statuses",
+        htmlContent: "<html><body><div>Checks<div>CI matrix</div></div></body></html>",
+        reason: "manual-capture",
+        tabId: 202,
+      },
+      {
+        url: "https://jira.example.com/browse/ENG-42",
+        title: "ENG-42 Story",
+        textContent: "Jira issue details and comments",
+        htmlContent: "<html><body><div>Issue<div>Description</div></div></body></html>",
+        reason: "recording-start-initial-scan",
+        tabId: 301,
+      },
+    ] as const;
+
+    for (const snapshot of snapshots) {
+      const response = await sendSnapshot(
+        chromeMock,
+        {
+          url: snapshot.url,
+          title: snapshot.title,
+          textContent: snapshot.textContent,
+          htmlContent: snapshot.htmlContent,
+          reason: snapshot.reason,
+        },
+        snapshot.tabId,
+      );
+      expect(response.ok).toBe(true);
+      expect(response.ignored).not.toBe(true);
+    }
+
+    await stopRecording(chromeMock);
+    const exportResponse = (await dispatchMessage(chromeMock, {
+      type: "EXPORT_SESSION",
+    })) as { ok: boolean; pageCount?: number };
+    expect(exportResponse.ok).toBe(true);
+    expect(exportResponse.pageCount).toBe(snapshots.length);
+
+    const downloadArgs = downloadSpy.mock.calls[0]?.[0];
+    const zipBytes = decodeDataUrlBytes(downloadArgs.url);
+    const entries = parseStoredZipEntries(zipBytes);
+    expect(entries.has("metadata.json")).toBe(false);
+
+    const pageEntries = [...entries.entries()].filter(
+      ([name]) => name.startsWith("pages/") && name.endsWith(".txt"),
+    );
+    expect(pageEntries).toHaveLength(snapshots.length);
+
+    for (const snapshot of snapshots) {
+      const pageContent = findExportedPageContentByUrl(entries, snapshot.url);
+      expect(pageContent).toContain(snapshot.textContent);
+      expectHtmlProjection(pageContent, snapshot.htmlContent);
+    }
+  });
+
+  it("validates html-to-exported-file content transformation through mocked browser pipeline", async () => {
+    const chromeMock = await loadBackground({
+      [STORAGE_KEYS.state]: withState(),
+      [STORAGE_KEYS.settings]: withSettings({
+        preset: "full_capture",
+        savePageHtml: true,
+        saveExportMetadata: false,
+      }),
+    });
+    const downloadSpy = vi.spyOn(chromeMock.downloads, "download");
+    vi.spyOn(chromeMock.tabs, "query").mockImplementation(async () => []);
+
+    await startRecording(chromeMock);
+    const response = await sendSnapshot(
+      chromeMock,
+      {
+        url: "https://app.slack.com/client/T999/C777",
+        title: "engine-room (Channel) - Slack",
+        reason: "poll-diff",
+        textContent: "Plain text body from capture",
+        htmlContent: [
+          "<html><head><style>.hidden{display:none}</style></head>",
+          "<body>",
+          "<div>Channel header</div>",
+          "<div>Thread root <span>reply one</span></div>",
+          "<div>&amp; escaped and <strong>bold text</strong></div>",
+          "<script>console.log('should not leak')</script>",
+          "</body></html>",
+        ].join(""),
+      },
+      909,
+    );
+    expect(response.ok).toBe(true);
+    expect(response.ignored).not.toBe(true);
+
+    await stopRecording(chromeMock);
+    const exportResponse = (await dispatchMessage(chromeMock, {
+      type: "EXPORT_SESSION",
+    })) as { ok: boolean; pageCount?: number };
+    expect(exportResponse.ok).toBe(true);
+    expect(exportResponse.pageCount).toBe(1);
+
+    const downloadArgs = downloadSpy.mock.calls[0]?.[0];
+    const zipBytes = decodeDataUrlBytes(downloadArgs.url);
+    const entries = parseStoredZipEntries(zipBytes);
+    const pageContent = findExportedPageContentByUrl(
+      entries,
+      "https://app.slack.com/client/T999/C777",
+    );
+
+    // File-level index remains at top of each exported page file.
+    expect(pageContent).toContain("# Page Index");
+    expect(pageContent).toContain("url: https://app.slack.com/client/T999/C777");
+
+    // Captured text block remains present.
+    expect(pageContent).toContain("content:\nPlain text body from capture");
+
+    // HTML is transformed to plain text lines in export.
+    expectHtmlProjection(
+      pageContent,
+      [
+        "<html><head><style>.hidden{display:none}</style></head>",
+        "<body>",
+        "<div>Channel header</div>",
+        "<div>Thread root <span>reply one</span></div>",
+        "<div>&amp; escaped and <strong>bold text</strong></div>",
+        "<script>console.log('should not leak')</script>",
+        "</body></html>",
+      ].join(""),
+    );
+
+    // Script/style internals and raw tags should not leak.
+    expect(pageContent).not.toContain("console.log('should not leak')");
+    expect(pageContent).not.toContain(".hidden{display:none}");
+    expect(pageContent).not.toContain("<div>");
+    expect(pageContent).not.toContain("<strong>");
   });
 
   it("covers snapshot ignore branches and runtime message matrix", async () => {

@@ -10,6 +10,7 @@ const semanticCaptureLevelEl = document.querySelector<HTMLSelectElement>("#seman
 const savePageHtmlEl = document.querySelector<HTMLInputElement>("#save-page-html");
 const saveRequestDataEl = document.querySelector<HTMLInputElement>("#save-request-data");
 const savePageMetaEl = document.querySelector<HTMLInputElement>("#save-page-meta");
+const saveExportMetadataEl = document.querySelector<HTMLInputElement>("#save-export-metadata");
 const forceInitialScanEl = document.querySelector<HTMLInputElement>("#force-initial-scan");
 const pollIntervalEl = document.querySelector<HTMLInputElement>("#poll-interval");
 const hardLimitMbEl = document.querySelector<HTMLSelectElement>("#hard-limit-mb");
@@ -33,6 +34,7 @@ function assertElements(): void {
     !savePageHtmlEl ||
     !saveRequestDataEl ||
     !savePageMetaEl ||
+    !saveExportMetadataEl ||
     !forceInitialScanEl ||
     !pollIntervalEl ||
     !hardLimitMbEl ||
@@ -106,6 +108,7 @@ function renderSettings(settings: RecorderSettings): void {
   savePageHtmlEl!.checked = settings.savePageHtml;
   saveRequestDataEl!.checked = settings.saveRequestData;
   savePageMetaEl!.checked = settings.savePageMeta;
+  saveExportMetadataEl!.checked = settings.saveExportMetadata;
   forceInitialScanEl!.checked = settings.forceInitialScanOnStart;
   pollIntervalEl!.value = String(settings.pollIntervalMs);
   hardLimitMbEl!.value = String(settings.hardLimitMb);
@@ -174,6 +177,7 @@ function currentSettingsFromInputs(): RecorderSettings {
     savePageHtml: savePageHtmlEl!.checked,
     saveRequestData: saveRequestDataEl!.checked,
     savePageMeta: savePageMetaEl!.checked,
+    saveExportMetadata: saveExportMetadataEl!.checked,
   };
   return {
     ...draft,
@@ -197,6 +201,12 @@ function bindEvents(): void {
   });
   savePageMetaEl!.addEventListener("change", () => {
     void persist({ savePageMeta: savePageMetaEl!.checked }, "Saved metadata setting.");
+  });
+  saveExportMetadataEl!.addEventListener("change", () => {
+    void persist(
+      { saveExportMetadata: saveExportMetadataEl!.checked },
+      "Saved export metadata setting.",
+    );
   });
   forceInitialScanEl!.addEventListener("change", () => {
     void persist(

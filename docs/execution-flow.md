@@ -52,20 +52,18 @@ exportZip --> downloads[Chrome Downloads API]
 Export writes `recordings/<sessionId>.zip` with:
 
 - `pages/<urlPrefix>/<fullUrl>.txt`
-- `metadata.json`
+- optional `metadata.json` (enabled by export metadata setting)
 
-Each page text file stores chronological snapshot blocks with fields such as:
+Each page text file stores a page-level index header followed by chronological snapshot blocks with fields such as:
 
-- `timestamp`
 - `url`
-- `title`
-- `reason`
-- `tabId`, `windowId`
+- `startedAt`, `endedAt`, `durationSeconds`, `snapshotCount`
+- aggregate `titles`, `reasons`, `tabIds`, `windowIds`
 - `content` (when page text capture is enabled)
-- optional `htmlContent` (when HTML capture is enabled)
+- optional flattened `htmlContent` (when HTML capture is enabled)
 
 `metadata.json` includes:
 
 - `sessionId`, `exportedAt`, `pageCount`, `urlCount`
 - `summary` and per-prefix `websites` aggregates
-- embedded `indexText` and effective `settings`
+- structured `index` and effective `settings`

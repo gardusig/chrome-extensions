@@ -13,6 +13,7 @@ const settings: RecorderSettings = {
   savePageHtml: true,
   saveRequestData: true,
   savePageMeta: true,
+  saveExportMetadata: false,
 };
 
 describe("sanitizePathPart", () => {

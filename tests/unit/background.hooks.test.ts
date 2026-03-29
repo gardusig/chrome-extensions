@@ -187,7 +187,12 @@ describe("background test hooks", () => {
       "pages/github.com/https___github.com_org_repo_pulls.txt",
       "pages/jira.example.com/https___jira.example.com_browse_ENG-42.txt",
     ]);
-    expect(entries[0].content).toContain("timestamp: 2026-03-28T10:00:01.000Z");
+    expect(entries[0].content).toContain("# Page Index");
+    expect(entries[0].content).toContain("url: https://github.com/org/repo");
+    expect(entries[0].content).toContain("startedAt: 2026-03-28T10:00:01.000Z");
+    expect(entries[0].content).toContain("endedAt: 2026-03-28T10:00:01.000Z");
+    expect(entries[0].content).toContain("durationSeconds: 0");
+    expect(entries[0].content).toContain("snapshotCount: 1");
     expect(entries[0].content).toContain("content:\nfirst");
     expect(entries[1].content).toContain("url: https://github.com/org/repo/pulls");
     expect(entries[2].content).toContain("url: https://jira.example.com/browse/ENG-42");
@@ -252,18 +257,19 @@ describe("background test hooks", () => {
 
     const content = entries[0].content;
     expect(content.match(/^---$/gm)).toHaveLength(3);
-    expect(content).toContain("reason: content-script-ready");
-    expect(content.match(/reason: poll-diff/g)).toHaveLength(2);
+    expect(content).toContain("reasons: content-script-ready | poll-diff");
+    expect(content).not.toContain("reason: content-script-ready");
+    expect(content).not.toContain("reason: poll-diff");
 
-    const firstIdx = content.indexOf("timestamp: 2026-03-28T10:00:01.000Z");
-    const secondIdx = content.indexOf("timestamp: 2026-03-28T10:00:02.000Z");
-    const thirdIdx = content.indexOf("timestamp: 2026-03-28T10:00:03.000Z");
+    const firstIdx = content.indexOf("content:\nfirst");
+    const secondIdx = content.indexOf("content:\nsecond");
+    const thirdIdx = content.indexOf("content:\nthird");
     expect(firstIdx).toBeGreaterThanOrEqual(0);
     expect(secondIdx).toBeGreaterThan(firstIdx);
     expect(thirdIdx).toBeGreaterThan(secondIdx);
-    expect(content).toContain("content:\nfirst");
-    expect(content).toContain("content:\nsecond");
-    expect(content).toContain("content:\nthird");
+    expect(content).not.toContain("timestamp:");
+    expect(content).not.toContain("tabId:");
+    expect(content).not.toContain("windowId:");
   });
 
   it("omits repeated semantic chunks in compacted export output", async () => {
@@ -314,7 +320,7 @@ describe("background test hooks", () => {
     expect(result.entries[0].content).toContain("<unchanged-from-previous-snapshot>");
   });
 
-  it("builds session index summary with host/page durations", async () => {
+  it("builds structured session index with host/page durations", async () => {
     const { module } = await loadBackgroundWithHooks();
     const hooks = module.__testHooks;
 
@@ -382,20 +388,25 @@ describe("background test hooks", () => {
       durationSeconds: 8,
     });
 
-    const indexText = hooks.buildSessionIndexText(
+    const index = hooks.buildSessionIndex(
       summary,
       "session-123",
       "2026-03-28T10:00:10.000Z",
     );
-    expect(indexText).toContain("websitesOpened: 2");
-    expect(indexText).toContain("urlsCaptured: 2");
-    expect(indexText).toContain("snapshotCount: 3");
-    expect(indexText).toContain("- host: github.com");
-    expect(indexText).toContain("durationSeconds: 8");
-    expect(indexText).toContain("url: https://github.com/org/repo");
+    expect(index).toMatchObject({
+      sessionId: "session-123",
+      exportedAt: "2026-03-28T10:00:10.000Z",
+      websitesOpened: 2,
+      urlsCaptured: 2,
+      snapshotCount: 3,
+      durationSeconds: 8,
+    });
+    expect(index.websites).toHaveLength(2);
+    expect(index.websites[0]?.urlPrefix).toBe("github.com");
+    expect(index.websites[0]?.pages[0]?.url).toBe("https://github.com/org/repo");
   });
 
-  it("includes index text inside export metadata payload", async () => {
+  it("includes structured index inside export metadata payload", async () => {
     const { module } = await loadBackgroundWithHooks();
     const hooks = module.__testHooks;
     const summary = hooks.buildSessionSummary([
@@ -415,7 +426,7 @@ describe("background test hooks", () => {
         contentSizeBytes: 1,
       },
     ]);
-    const indexText = hooks.buildSessionIndexText(
+    const index = hooks.buildSessionIndex(
       summary,
       "session-xyz",
       "2026-03-28T10:00:01.000Z",
@@ -425,7 +436,7 @@ describe("background test hooks", () => {
       exportedAt: "2026-03-28T10:00:01.000Z",
       pageCount: 1,
       summary,
-      indexText,
+      index,
       compaction: {
         semanticChunksRaw: 1,
         semanticChunksOmitted: 0,
@@ -442,6 +453,7 @@ describe("background test hooks", () => {
         savePageHtml: false,
         saveRequestData: false,
         savePageMeta: true,
+        saveExportMetadata: false,
       },
     });
 
@@ -458,7 +470,16 @@ describe("background test hooks", () => {
         endedAt: "2026-03-28T10:00:00.000Z",
         durationSeconds: 0,
       },
-      indexText,
+      index: {
+        sessionId: "session-xyz",
+        exportedAt: "2026-03-28T10:00:01.000Z",
+        websitesOpened: 1,
+        urlsCaptured: 1,
+        snapshotCount: 1,
+        startedAt: "2026-03-28T10:00:00.000Z",
+        endedAt: "2026-03-28T10:00:00.000Z",
+        durationSeconds: 0,
+      },
       compaction: {
         semanticChunksRaw: 1,
         semanticChunksOmitted: 0,
@@ -475,9 +496,10 @@ describe("background test hooks", () => {
         savePageHtml: false,
         saveRequestData: false,
         savePageMeta: true,
+        saveExportMetadata: false,
       },
     });
-    expect(metadata.indexText).toContain("# Session Index");
+    expect(metadata.index.websites).toHaveLength(1);
     expect(metadata.websites).toHaveLength(1);
     expect(metadata.websites[0]).toMatchObject({
       urlPrefix: "github.com",

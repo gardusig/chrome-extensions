@@ -21,6 +21,7 @@ function mountOptionsDom(): void {
     <input id="save-page-html" type="checkbox" />
     <input id="save-request-data" type="checkbox" />
     <input id="save-page-meta" type="checkbox" />
+    <input id="save-export-metadata" type="checkbox" />
     <input id="force-initial-scan" type="checkbox" />
     <input id="poll-interval" type="number" />
     <select id="hard-limit-mb"><option value="8">8</option></select>
@@ -60,6 +61,7 @@ describe("options", () => {
       savePageHtml: false,
       saveRequestData: false,
       savePageMeta: true,
+      saveExportMetadata: false,
     };
     const pipelineStats: PipelineStats = {
       queue: { pending: 2, processing: 1, failed: 0, processed: 12 },
@@ -121,6 +123,7 @@ describe("options", () => {
       savePageHtml: true,
       saveRequestData: true,
       savePageMeta: true,
+      saveExportMetadata: false,
     };
     const emptyStats: PipelineStats = {
       queue: { pending: 0, processing: 0, failed: 0, processed: 0 },

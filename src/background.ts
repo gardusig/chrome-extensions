@@ -17,6 +17,7 @@ import {
 } from "./lib/db";
 import { estimateCompressedBytes } from "./lib/metrics";
 import { parseSections } from "./lib/section-parsers/registry";
+import { transformHtmlToIndentedText } from "./lib/html-textify";
 import { createZip } from "./lib/zip";
 import {
   STORAGE_KEYS,
@@ -66,6 +67,7 @@ const DEFAULT_SETTINGS: RecorderSettings = {
   savePageHtml: false,
   saveRequestData: false,
   savePageMeta: true,
+  saveExportMetadata: false,
 };
 
 let recorderState: RecorderState = { ...DEFAULT_STATE };
@@ -317,10 +319,11 @@ async function enqueueRawSnapshot(raw: RawPageRecord): Promise<boolean> {
 }
 
 function enrichRawRecord(raw: RawPageRecord, signatureHash: number): EnrichedPageRecord {
+  const htmlContent = transformHtmlToIndentedText(raw.htmlContent);
   const sections = parseSections({
     url: raw.url,
     textContent: raw.textContent,
-    htmlContent: raw.htmlContent,
+    htmlContent,
   });
   return {
     id: makeRecordId(),
@@ -333,7 +336,7 @@ function enrichRawRecord(raw: RawPageRecord, signatureHash: number): EnrichedPag
     reason: raw.reason,
     timestamp: raw.createdAt,
     textContent: raw.textContent || undefined,
-    htmlContent: raw.htmlContent || undefined,
+    htmlContent: htmlContent || undefined,
     signatureHash,
     sectionCount: sections.length,
     contentSizeBytes: raw.contentSizeBytes,
@@ -474,7 +477,17 @@ type ExportMetadata = {
     durationSeconds: number | null;
   };
   websites: WebsiteSummary[];
-  indexText: string;
+  index: {
+    sessionId: string;
+    exportedAt: string;
+    websitesOpened: number;
+    urlsCaptured: number;
+    snapshotCount: number;
+    startedAt: string | null;
+    endedAt: string | null;
+    durationSeconds: number | null;
+    websites: WebsiteSummary[];
+  };
   compaction: {
     semanticChunksRaw: number;
     semanticChunksOmitted: number;
@@ -586,47 +599,22 @@ function buildSessionSummary(pages: EnrichedPageRecord[]): SessionSummary {
   };
 }
 
-function buildSessionIndexText(
+function buildSessionIndex(
   summary: SessionSummary,
   sessionId: string,
   exportedAt: string,
-): string {
-  const lines: string[] = [
-    "# Session Index",
-    `sessionId: ${sessionId}`,
-    `exportedAt: ${exportedAt}`,
-    `websitesOpened: ${summary.websiteCount}`,
-    `urlsCaptured: ${summary.urlCount}`,
-    `snapshotCount: ${summary.snapshotCount}`,
-    `startedAt: ${summary.startedAt ?? "-"}`,
-    `endedAt: ${summary.endedAt ?? "-"}`,
-    `durationSeconds: ${summary.durationSeconds ?? "-"}`,
-    "",
-    "## Websites",
-  ];
-
-  if (summary.websites.length === 0) {
-    lines.push("(none)");
-    return lines.join("\n");
-  }
-
-  for (const site of summary.websites) {
-    lines.push(`- host: ${site.urlPrefix}`);
-    lines.push(`  snapshotCount: ${site.snapshotCount}`);
-    lines.push(`  uniqueUrls: ${site.uniqueUrlCount}`);
-    lines.push(`  startedAt: ${site.startedAt ?? "-"}`);
-    lines.push(`  endedAt: ${site.endedAt ?? "-"}`);
-    lines.push(`  durationSeconds: ${site.durationSeconds ?? "-"}`);
-    lines.push("  pages:");
-    for (const page of site.pages) {
-      lines.push(`    - url: ${page.url}`);
-      lines.push(`      snapshotCount: ${page.snapshotCount}`);
-      lines.push(`      startedAt: ${page.startedAt ?? "-"}`);
-      lines.push(`      endedAt: ${page.endedAt ?? "-"}`);
-      lines.push(`      durationSeconds: ${page.durationSeconds ?? "-"}`);
-    }
-  }
-  return lines.join("\n");
+): ExportMetadata["index"] {
+  return {
+    sessionId,
+    exportedAt,
+    websitesOpened: summary.websiteCount,
+    urlsCaptured: summary.urlCount,
+    snapshotCount: summary.snapshotCount,
+    startedAt: summary.startedAt,
+    endedAt: summary.endedAt,
+    durationSeconds: summary.durationSeconds,
+    websites: summary.websites,
+  };
 }
 
 function buildExportMetadata(params: {
@@ -634,11 +622,11 @@ function buildExportMetadata(params: {
   exportedAt: string;
   pageCount: number;
   summary: SessionSummary;
-  indexText: string;
+  index: ExportMetadata["index"];
   compaction: ExportCompactionStats;
   settings: RecorderSettings;
 }): ExportMetadata {
-  const { sessionId, exportedAt, pageCount, summary, indexText, compaction, settings } = params;
+  const { sessionId, exportedAt, pageCount, summary, index, compaction, settings } = params;
   return {
     sessionId,
     exportedAt,
@@ -653,7 +641,7 @@ function buildExportMetadata(params: {
       durationSeconds: summary.durationSeconds,
     },
     websites: summary.websites,
-    indexText,
+    index,
     compaction,
     settings,
   };
@@ -717,25 +705,58 @@ function buildPrefixPageTextBlocks(params: { pages: EnrichedPageRecord[] }): {
   content: string;
   stats: ExportCompactionStats;
 } {
+  const sortedPages = [...params.pages].sort(
+    (a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp),
+  );
+  if (sortedPages.length === 0) {
+    return {
+      content: "",
+      stats: {
+        semanticChunksRaw: 0,
+        semanticChunksOmitted: 0,
+        snapshotsCompacted: 0,
+      },
+    };
+  }
+
+  const uniqueValues = <T extends string | number>(values: T[]): T[] =>
+    [...new Set(values)].sort((a, b) => String(a).localeCompare(String(b)));
+  const startedAt = sortedPages[0]?.timestamp ?? null;
+  const endedAt = sortedPages[sortedPages.length - 1]?.timestamp ?? null;
+  const startedAtMs = startedAt ? toTimestampMs(startedAt) : null;
+  const endedAtMs = endedAt ? toTimestampMs(endedAt) : null;
+
+  const titleValues = uniqueValues(
+    sortedPages.map((page) => page.title).filter((value): value is string => Boolean(value)),
+  );
+  const reasonValues = uniqueValues(
+    sortedPages.map((page) => page.reason).filter((value): value is string => Boolean(value)),
+  );
+  const tabIdValues = uniqueValues(sortedPages.map((page) => page.tabId));
+  const windowIdValues = uniqueValues(sortedPages.map((page) => page.windowId));
+  const headerLines: string[] = [
+    "# Page Index",
+    `url: ${sortedPages[0].url}`,
+    `startedAt: ${startedAt ?? "-"}`,
+    `endedAt: ${endedAt ?? "-"}`,
+    `durationSeconds: ${durationSecondsFrom(startedAtMs, endedAtMs) ?? "-"}`,
+    `snapshotCount: ${sortedPages.length}`,
+    `titles: ${titleValues.length > 0 ? titleValues.join(" | ") : "-"}`,
+    `reasons: ${reasonValues.length > 0 ? reasonValues.join(" | ") : "-"}`,
+    `tabIds: ${tabIdValues.join(",")}`,
+    `windowIds: ${windowIdValues.join(",")}`,
+    "",
+  ];
+
   let previousSemanticSignature: string | null = null;
   const stats: ExportCompactionStats = {
     semanticChunksRaw: 0,
     semanticChunksOmitted: 0,
     snapshotsCompacted: 0,
   };
-  const content = params.pages
-    .sort((a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp))
+  const bodyContent = sortedPages
     .map((page) => {
-      const lines: string[] = [
-        "---",
-        `timestamp: ${page.timestamp}`,
-        `url: ${page.url}`,
-        `title: ${page.title || "-"}`,
-        `reason: ${page.reason || "-"}`,
-        `tabId: ${page.tabId}`,
-        `windowId: ${page.windowId}`,
-        "content:",
-      ];
+      const lines: string[] = ["---", "content:"];
       const rawContent = (page.textContent ?? "").trim();
       let pageContent = rawContent;
       if (rawContent.length > 0) {
@@ -760,6 +781,7 @@ function buildPrefixPageTextBlocks(params: { pages: EnrichedPageRecord[] }): {
       return lines.join("\n");
     })
     .join("\n\n");
+  const content = `${headerLines.join("\n")}${bodyContent}`;
   return {
     content,
     stats,
@@ -961,20 +983,23 @@ async function handleExportSession(): Promise<{
   activeExportSessions.add(sessionId);
   try {
     const { entries: urlEntries, compaction } = buildUrlTextEntriesWithCompaction(pages);
-    const exportedAt = new Date().toISOString();
     const summary = buildSessionSummary(pages);
-    const indexText = buildSessionIndexText(summary, sessionId, exportedAt);
-    const exportMetadata = buildExportMetadata({
-      sessionId,
-      exportedAt,
-      pageCount: pages.length,
-      summary,
-      indexText,
-      compaction,
-      settings: recorderSettings,
-    });
-    const metadata = JSON.stringify(exportMetadata, null, 2);
-    const zipBytes = createZip([...urlEntries, { filename: "metadata.json", content: metadata }]);
+    const zipEntries = [...urlEntries];
+    if (recorderSettings.saveExportMetadata) {
+      const exportedAt = new Date().toISOString();
+      const index = buildSessionIndex(summary, sessionId, exportedAt);
+      const exportMetadata = buildExportMetadata({
+        sessionId,
+        exportedAt,
+        pageCount: pages.length,
+        summary,
+        index,
+        compaction,
+        settings: recorderSettings,
+      });
+      zipEntries.push({ filename: "metadata.json", content: JSON.stringify(exportMetadata, null, 2) });
+    }
+    const zipBytes = createZip(zipEntries);
     await downloadZipFile(buildExportFilename(), zipBytes);
     return {
       sessionId,
@@ -1130,7 +1155,7 @@ export const __testHooks = {
   resetSnapshotStateForSession,
   sanitizeZipPathPart,
   buildSessionSummary,
-  buildSessionIndexText,
+  buildSessionIndex,
   buildExportMetadata,
   buildPrefixPageTextBlocks,
   buildUrlTextEntries,

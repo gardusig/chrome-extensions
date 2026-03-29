@@ -108,6 +108,38 @@ describe("background integration", () => {
     vi.restoreAllMocks();
   });
 
+  it("handles stop while idle and ignores snapshots without a tab sender", async () => {
+    const chromeMock = await loadBackground({
+      [STORAGE_KEYS.state]: withState(),
+      [STORAGE_KEYS.settings]: withSettings(),
+    });
+    vi.spyOn(chromeMock.tabs, "query").mockImplementation(async () => []);
+
+    const stopWhileIdle = await stopRecording(chromeMock);
+    expect(stopWhileIdle.ok).toBe(true);
+    expect(stopWhileIdle.state).toMatchObject({
+      isRecording: false,
+      isStopping: false,
+      stoppedAt: null,
+    });
+
+    await startRecording(chromeMock);
+    const noTabSender = (await dispatchMessage(
+      chromeMock,
+      {
+        type: "CONTENT_PAGE_SNAPSHOT",
+        payload: {
+          url: "https://example.com/no-tab",
+          title: "No tab",
+          textContent: "missing sender.tab.id",
+          reason: "poll-diff",
+        },
+      },
+      {},
+    )) as SnapshotResponse;
+    expect(noTabSender).toEqual({ ok: true, ignored: true });
+  });
+
   it("captures snapshots into queue, drains on stop, and exports one zip", async () => {
     const chromeMock = await loadBackground({
       [STORAGE_KEYS.state]: withState(),

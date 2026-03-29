@@ -43,5 +43,5 @@ URL query params containing sensitive key names are redacted as `[REDACTED]` in 
 ## MVP Constraints
 
 - Local capture uses IndexedDB and enforces a hard byte limit.
-- Recommended safe hard limits without `unlimitedStorage` permission: `6/8/9/10 MB`.
+- Hard-limit settings are user-configurable (`32/64/128/256/512/1024 MB`, default `32 MB`).
 - Export is lock-guarded per session id to prevent concurrent duplicate exports.

@@ -224,23 +224,30 @@ describe("background integration", () => {
     expect(first.ok).toBe(true);
     expect(first.ignored).not.toBe(true);
 
-    // 4) Duplicate ignored.
+    // 4) Duplicate is now accepted into raw+queue and deduped in consumer.
     const duplicate = await sendSnapshot(chromeMock, {
       url: "https://example.com/a",
       title: "A",
       textContent: "first",
       reason: "pagehide",
     });
-    expect(duplicate).toEqual({ ok: true, ignored: true });
+    expect(duplicate).toEqual({ ok: true, ignored: false });
 
-    // 5) Poll-diff within throttle window ignored.
+    // 5) Poll-diff is also accepted and evaluated in queue consumer stage.
     const throttled = await sendSnapshot(chromeMock, {
       url: "https://example.com/a",
       title: "A",
       textContent: "second",
       reason: "poll-diff",
     });
-    expect(throttled).toEqual({ ok: true, ignored: true });
+    expect(throttled).toEqual({ ok: true, ignored: false });
+
+    await stopRecording(chromeMock);
+    const pipelineAfterDrain = (await dispatchMessage(chromeMock, {
+      type: "GET_PIPELINE_STATS",
+    })) as { ok: boolean; stats?: { totals: { enrichedCount: number } } };
+    expect(pipelineAfterDrain.ok).toBe(true);
+    expect(pipelineAfterDrain.stats?.totals.enrichedCount).toBe(2);
 
     await expect(dispatchMessage(chromeMock, { type: "GET_STATE" })).resolves.toMatchObject({
       ok: true,
@@ -269,7 +276,7 @@ describe("background integration", () => {
   it("accepts large snapshots and updates state stats", async () => {
     const chromeMock = await loadBackground({
       [STORAGE_KEYS.state]: withState({ storageBytesInUse: 34 * 1024 * 1024 }),
-      [STORAGE_KEYS.settings]: withSettings(),
+      [STORAGE_KEYS.settings]: withSettings({ hardLimitMb: 128 }),
     });
     vi.spyOn(chromeMock.tabs, "query").mockImplementation(async () => []);
     await startRecording(chromeMock);

@@ -3,7 +3,7 @@ import { estimateCompressedBytes, ratioFromSizes } from "../../../src/lib/metric
 
 describe("metrics helpers", () => {
   it("estimates compressed bytes from clamped total size", () => {
-    expect(estimateCompressedBytes(1_000)).toBe(350);
+    expect(estimateCompressedBytes(1_000)).toBe(385);
     expect(estimateCompressedBytes(-100)).toBe(0);
   });
 

@@ -197,7 +197,7 @@ function bindEvents(): void {
     );
   });
   pollIntervalEl!.addEventListener("change", () => {
-    const value = Math.max(100, Math.min(5_000, Number(pollIntervalEl!.value || "300")));
+    const value = Math.max(100, Math.min(5_000, Number(pollIntervalEl!.value || "100")));
     pollIntervalEl!.value = String(value);
     void persist({ pollIntervalMs: value }, "Saved poll interval.");
   });

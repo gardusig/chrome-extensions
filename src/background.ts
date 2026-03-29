@@ -1,9 +1,11 @@
 import { redactUrl, truncateText } from "./lib/redact";
 import {
+  acknowledgeDiscarded,
   acknowledgeProcessed,
   addRawAndQueue,
   clearAllCaptureData,
   getRawPage,
+  hasEnrichedSignature,
   hasPendingQueueMessages,
   listEnrichedPages,
   markQueueFailed,
@@ -54,9 +56,9 @@ const DEFAULT_STATE: RecorderState = {
 
 const DEFAULT_SETTINGS: RecorderSettings = {
   preset: "pages_only",
-  hardLimitMb: 256,
+  hardLimitMb: 32,
   autoExportOnSoftLimit: false,
-  pollIntervalMs: 300,
+  pollIntervalMs: 100,
   forceInitialScanOnStart: false,
   savePageText: true,
   savePageHtml: false,
@@ -70,6 +72,7 @@ const PAGE_TEXT_LIMIT = 50_000;
 const PAGE_HTML_LIMIT = 200_000;
 const SNAPSHOT_MIN_INTERVAL_MS = 100;
 const CONSUMER_IDLE_SLEEP_MS = 120;
+const MAX_HARD_LIMIT_MB = 1152;
 
 type TabSnapshotState = {
   hash: number;
@@ -100,8 +103,8 @@ function normalizeSettings(settings: RecorderSettings | undefined): RecorderSett
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
-    hardLimitMb: Math.min(Math.max(Math.round(settings?.hardLimitMb ?? 256), 32), 1024),
-    pollIntervalMs: Math.min(Math.max(Math.round(settings?.pollIntervalMs ?? 300), 100), 5_000),
+    hardLimitMb: Math.min(Math.max(Math.round(settings?.hardLimitMb ?? 32), 32), MAX_HARD_LIMIT_MB),
+    pollIntervalMs: Math.min(Math.max(Math.round(settings?.pollIntervalMs ?? 100), 100), 5_000),
   };
 }
 
@@ -271,14 +274,14 @@ function isRecording(): boolean {
   return recorderState.isRecording;
 }
 
-async function enqueueRawSnapshot(raw: RawPageRecord, dedupeKey: string): Promise<boolean> {
+async function enqueueRawSnapshot(raw: RawPageRecord): Promise<boolean> {
   const queueRecord: QueueRecord = {
     id: makeRecordId(),
     rawId: raw.id,
     createdAt: raw.createdAt,
     tabId: raw.tabId,
     urlPrefix: raw.urlPrefix,
-    dedupeKey,
+    dedupeKey: raw.id,
     status: "pending",
     attempts: 0,
     lastUpdatedAt: raw.createdAt,
@@ -302,7 +305,7 @@ async function enqueueRawSnapshot(raw: RawPageRecord, dedupeKey: string): Promis
   }
 }
 
-function enrichRawRecord(raw: RawPageRecord): EnrichedPageRecord {
+function enrichRawRecord(raw: RawPageRecord, signatureHash: number): EnrichedPageRecord {
   const sections = parseSections({
     url: raw.url,
     textContent: raw.textContent,
@@ -320,6 +323,7 @@ function enrichRawRecord(raw: RawPageRecord): EnrichedPageRecord {
     timestamp: raw.createdAt,
     textContent: raw.textContent || undefined,
     htmlContent: raw.htmlContent || undefined,
+    signatureHash,
     sectionCount: sections.length,
     contentSizeBytes: raw.contentSizeBytes,
   };
@@ -342,7 +346,18 @@ async function runConsumerLoop(): Promise<void> {
         continue;
       }
       try {
-        const enriched = enrichRawRecord(raw);
+        const signatureHash = snapshotSignatureHash({
+          url: raw.url,
+          title: raw.title,
+          textContent: raw.textContent,
+          htmlContent: raw.htmlContent,
+        });
+        const alreadySeen = await hasEnrichedSignature(raw.url, signatureHash);
+        if (alreadySeen) {
+          await acknowledgeDiscarded(next.id, next.rawId);
+          continue;
+        }
+        const enriched = enrichRawRecord(raw, signatureHash);
         await acknowledgeProcessed(next.id, next.rawId, enriched);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -858,22 +873,12 @@ async function handleContentPageSnapshot(
   if (!isRecording() || (recorderState.isStopping ?? false) || sender.tab?.id === undefined) {
     return { ok: true, ignored: true };
   }
-  const acceptedAt = Date.now();
   const textContent = recorderSettings.savePageText
     ? truncateText(message.payload.textContent, PAGE_TEXT_LIMIT)
     : "";
   const htmlContent = recorderSettings.savePageHtml
     ? truncateText(message.payload.htmlContent ?? "", PAGE_HTML_LIMIT)
     : undefined;
-  const hash = snapshotSignatureHash({
-    url: redactUrl(message.payload.url),
-    title: message.payload.title,
-    textContent,
-    htmlContent,
-  });
-  if (!shouldAppendSnapshot(sender.tab.id, hash, acceptedAt, message.payload.reason)) {
-    return { ok: true, ignored: true };
-  }
   if (!textContent && !htmlContent) {
     return { ok: true, ignored: true };
   }
@@ -889,7 +894,7 @@ async function handleContentPageSnapshot(
     reason: recorderSettings.savePageMeta ? message.payload.reason : "capture",
     textContent,
     htmlContent,
-    signatureHash: hash,
+    signatureHash: 0,
     contentSizeBytes: new Blob([textContent, htmlContent ?? ""]).size,
   };
   if (recorderState.storageBytesInUse + raw.contentSizeBytes > getIndexedDbHardLimitBytes()) {
@@ -899,9 +904,7 @@ async function handleContentPageSnapshot(
     });
     return { ok: true, ignored: true };
   }
-  const coarseBucket = Math.floor(acceptedAt / 1_000);
-  const dedupeKey = `${raw.urlPrefix}|${hash}|${coarseBucket}`;
-  const accepted = await enqueueRawSnapshot(raw, dedupeKey);
+  const accepted = await enqueueRawSnapshot(raw);
   if (accepted) {
     ensureConsumerLoopRunning();
   }

@@ -40,6 +40,7 @@ export type EnrichedPageRecord = {
   timestamp: string;
   textContent?: string;
   htmlContent?: string;
+  signatureHash: number;
   sectionCount: number;
   contentSizeBytes: number;
 };
@@ -73,10 +74,13 @@ type MemoryDbState = {
 };
 
 const DB_NAME = "recorder-idb";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_RAW = "raw_pages";
 const STORE_QUEUE = "page_queue";
 const STORE_ENRICHED = "enriched_pages";
+const INDEX_QUEUE_STATUS = "status";
+const INDEX_QUEUE_DEDUPE_KEY = "dedupeKey";
+const INDEX_ENRICHED_URL_HASH = "urlHash";
 const METRIC_KEY = "__metrics";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -106,11 +110,29 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_QUEUE)) {
         const queueStore = db.createObjectStore(STORE_QUEUE, { keyPath: "id" });
-        queueStore.createIndex("status", "status", { unique: false });
-        queueStore.createIndex("dedupeKey", "dedupeKey", { unique: false });
+        queueStore.createIndex(INDEX_QUEUE_STATUS, "status", { unique: false });
+        queueStore.createIndex(INDEX_QUEUE_DEDUPE_KEY, "dedupeKey", { unique: false });
+      } else {
+        const queueStore = request.transaction!.objectStore(STORE_QUEUE);
+        if (!queueStore.indexNames.contains(INDEX_QUEUE_STATUS)) {
+          queueStore.createIndex(INDEX_QUEUE_STATUS, "status", { unique: false });
+        }
+        if (!queueStore.indexNames.contains(INDEX_QUEUE_DEDUPE_KEY)) {
+          queueStore.createIndex(INDEX_QUEUE_DEDUPE_KEY, "dedupeKey", { unique: false });
+        }
       }
       if (!db.objectStoreNames.contains(STORE_ENRICHED)) {
-        db.createObjectStore(STORE_ENRICHED, { keyPath: "id" });
+        const enrichedStore = db.createObjectStore(STORE_ENRICHED, { keyPath: "id" });
+        enrichedStore.createIndex(INDEX_ENRICHED_URL_HASH, ["url", "signatureHash"], {
+          unique: false,
+        });
+      } else {
+        const enrichedStore = request.transaction!.objectStore(STORE_ENRICHED);
+        if (!enrichedStore.indexNames.contains(INDEX_ENRICHED_URL_HASH)) {
+          enrichedStore.createIndex(INDEX_ENRICHED_URL_HASH, ["url", "signatureHash"], {
+            unique: false,
+          });
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -166,12 +188,6 @@ export async function addRawAndQueue(
   queue: QueueRecord,
 ): Promise<{ accepted: boolean }> {
   if (!hasIndexedDb()) {
-    const duplicate = [...memoryState.queue.values()].some(
-      (record) => record.dedupeKey === queue.dedupeKey && record.status !== "failed",
-    );
-    if (duplicate) {
-      return { accepted: false };
-    }
     memoryState.rawPages.set(raw.id, raw);
     memoryState.queue.set(queue.id, queue);
     return { accepted: true };
@@ -180,15 +196,6 @@ export async function addRawAndQueue(
   const db = await openDb();
   const tx = db.transaction([STORE_RAW, STORE_QUEUE], "readwrite");
   const queueStore = tx.objectStore(STORE_QUEUE);
-  const dedupeIndex = queueStore.index("dedupeKey");
-  const existingWithKey = (await reqToPromise(
-    dedupeIndex.getAll(queue.dedupeKey) as IDBRequest<QueueRecord[]>,
-  )) as QueueRecord[];
-  const duplicate = existingWithKey.some((record) => record.status !== "failed");
-  if (duplicate) {
-    tx.abort();
-    return { accepted: false };
-  }
   tx.objectStore(STORE_RAW).put(raw);
   queueStore.put(queue);
   await txDone(tx);
@@ -215,7 +222,7 @@ export async function pollNextQueueRecord(): Promise<QueueRecord | null> {
   const db = await openDb();
   const tx = db.transaction(STORE_QUEUE, "readwrite");
   const queueStore = tx.objectStore(STORE_QUEUE);
-  const statusIndex = queueStore.index("status");
+  const statusIndex = queueStore.index(INDEX_QUEUE_STATUS);
   const pending = (await reqToPromise(
     statusIndex.getAll("pending") as IDBRequest<QueueRecord[]>,
   )) as QueueRecord[];
@@ -248,6 +255,23 @@ export async function getRawPage(rawId: string): Promise<RawPageRecord | null> {
   return record ?? null;
 }
 
+export async function hasEnrichedSignature(url: string, signatureHash: number): Promise<boolean> {
+  if (!hasIndexedDb()) {
+    return [...memoryState.enrichedPages.values()].some(
+      (row) => row.url === url && row.signatureHash === signatureHash,
+    );
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_ENRICHED, "readonly");
+  const store = tx.objectStore(STORE_ENRICHED);
+  const index = store.index(INDEX_ENRICHED_URL_HASH);
+  const existing = await reqToPromise(
+    index.get([url, signatureHash]) as IDBRequest<EnrichedPageRecord | undefined>,
+  );
+  await txDone(tx);
+  return Boolean(existing);
+}
+
 export async function acknowledgeProcessed(
   queueId: string,
   rawId: string,
@@ -263,6 +287,22 @@ export async function acknowledgeProcessed(
   const db = await openDb();
   const tx = db.transaction([STORE_QUEUE, STORE_RAW, STORE_ENRICHED], "readwrite");
   tx.objectStore(STORE_ENRICHED).put(enriched);
+  tx.objectStore(STORE_QUEUE).delete(queueId);
+  tx.objectStore(STORE_RAW).delete(rawId);
+  await txDone(tx);
+  const count = await getProcessedCount();
+  await setProcessedCount(count + 1);
+}
+
+export async function acknowledgeDiscarded(queueId: string, rawId: string): Promise<void> {
+  if (!hasIndexedDb()) {
+    memoryState.queue.delete(queueId);
+    memoryState.rawPages.delete(rawId);
+    memoryState.processedCount += 1;
+    return;
+  }
+  const db = await openDb();
+  const tx = db.transaction([STORE_QUEUE, STORE_RAW], "readwrite");
   tx.objectStore(STORE_QUEUE).delete(queueId);
   tx.objectStore(STORE_RAW).delete(rawId);
   await txDone(tx);
@@ -306,7 +346,7 @@ export async function hasPendingQueueMessages(): Promise<boolean> {
   }
   const db = await openDb();
   const tx = db.transaction(STORE_QUEUE, "readonly");
-  const statusIndex = tx.objectStore(STORE_QUEUE).index("status");
+  const statusIndex = tx.objectStore(STORE_QUEUE).index(INDEX_QUEUE_STATUS);
   const pending = (await reqToPromise(
     statusIndex.getAll("pending") as IDBRequest<QueueRecord[]>,
   )) as QueueRecord[];

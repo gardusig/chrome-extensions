@@ -68,7 +68,7 @@ npm run format:local
 ## Usage
 
 1. Open extension popup and click **Start**.
-2. Recorder starts one polling loop per open tab (minimum 100ms), collects labeled text snapshots, and appends new snapshots when content changes.
+2. Recorder starts one polling loop per open tab (default/minimum 100ms), collects labeled text snapshots, and appends new snapshots when content changes.
 3. Navigate pages normally in Chrome.
 4. Click **Stop** when done.
 5. Click **Export Session** to download `recordings/<sessionId>.zip` to your Downloads folder.
@@ -90,7 +90,7 @@ npm run format:local
 - Capture pipeline data is stored in IndexedDB (`raw_pages`, `page_queue`, `enriched_pages`).
 - Recorder enforces a hard size limit and drops new snapshots once the limit is reached.
 - Popup offers short capture presets (`Pages only`, `Pages + requests`, `Full capture`).
-- Popup has **Open all settings** for advanced filters and safe quota limits (`6/8/9/10 MB`).
+- Popup has **Open all settings** for advanced filters and hard-limit options (`32/64/128/256/512/1024 MB`, default `32 MB`).
 - Export creates a zip in Downloads as `recordings/<sessionId>.zip`.
 - Zip contents include:
   - `pages/<urlPrefix>/<fullUrl>.txt` (chronological structured text blocks, one file per full URL nested under prefix folders)

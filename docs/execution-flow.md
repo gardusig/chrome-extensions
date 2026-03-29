@@ -44,7 +44,7 @@ exportZip --> downloads[Chrome Downloads API]
 
 ## Polling Cadence
 
-- Default poll interval is `300ms`.
+- Default poll interval is `100ms` (minimum).
 - Settings updates are pushed to open tabs and applied without reload.
 
 ## Canonical Export Contract

@@ -218,7 +218,7 @@ if (!window.__recorderContentBootstrapped) {
   function setupSnapshotLoop(): void {
     let lastHash = -1;
     let isSnapshotInFlight = false;
-    let pollIntervalMs = 300;
+    let pollIntervalMs = 100;
     let includeHtmlInSnapshots = false;
     let intervalId = -1;
 

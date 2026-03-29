@@ -60,6 +60,7 @@ function makeEnriched(id: string, timestamp: string): EnrichedPageRecord {
     timestamp,
     textContent: `text-${id}`,
     htmlContent: `<html>${id}</html>`,
+    signatureHash: Number(id),
     sectionCount: 2,
     contentSizeBytes: 256,
   };
@@ -70,7 +71,7 @@ describe("db memory fallback", () => {
     setIndexedDb(undefined);
   });
 
-  it("processes queue lifecycle, dedupes pending records, and computes stats", async () => {
+  it("processes queue lifecycle and computes stats", async () => {
     const db = await loadDbModule();
     await db.clearAllCaptureData();
 
@@ -79,7 +80,7 @@ describe("db memory fallback", () => {
       accepted: true,
     });
     expect(await db.addRawAndQueue(makeRaw("2"), makeQueue("2", queue1.dedupeKey))).toEqual({
-      accepted: false,
+      accepted: true,
     });
 
     expect(await db.hasPendingQueueMessages()).toBe(true);
@@ -91,12 +92,8 @@ describe("db memory fallback", () => {
     expect(await db.getRawPage("1")).not.toBeNull();
 
     await db.markQueueFailed("1", "pipeline failed");
-    expect(await db.hasPendingQueueMessages()).toBe(false);
+    expect(await db.hasPendingQueueMessages()).toBe(true);
 
-    const queue2 = makeQueue("2", "dedupe-a");
-    expect(await db.addRawAndQueue(makeRaw("2"), queue2)).toEqual({
-      accepted: true,
-    });
     const picked2 = await db.pollNextQueueRecord();
     expect(picked2?.id).toBe("2");
 

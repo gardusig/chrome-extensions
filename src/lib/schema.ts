@@ -53,21 +53,21 @@ export type SessionStats = {
   droppedPageCount: number;
   requestCount: number;
   droppedRequestCount: number;
-  hostCount: number;
+  urlCount: number;
   storageBytesInUse: number;
 };
 
 export type HostQueueStatsRow = {
-  host: string;
+  url: string;
   mapped: boolean;
   queueSize: number;
   workerActive: boolean;
 };
 
 export type HostQueueStats = {
-  distinctHostCount: number;
+  distinctUrlCount: number;
   generatedAt: string;
-  hosts: HostQueueStatsRow[];
+  urls: HostQueueStatsRow[];
 };
 
 export type PipelineStats = {
@@ -83,8 +83,8 @@ export type PipelineStats = {
     totalBytes: number;
     estimatedCompressedBytes: number;
   };
-  urlPrefixRows: Array<{
-    urlPrefix: string;
+  urlRows: Array<{
+    url: string;
     pageCount: number;
     bytes: number;
   }>;

@@ -44,16 +44,185 @@ if (!window.__recorderContentBootstrapped) {
     return hash;
   }
 
+  const MAX_CHUNKS = 64;
+  const MAX_SELECTOR_DEPTH = 3;
+  const MAX_CHARS_PER_CHUNK = 8_000;
+  const MAX_SEMANTIC_ELEMENTS = 150;
+  const MAX_DOM_SCAN_ELEMENTS = 400;
+
+  function normalizeChunkText(value: string): string {
+    return value.replaceAll(/\s+/g, " ").trim();
+  }
+
+  function elementSelectorHint(element: Element | null): string {
+    if (!element) {
+      return "unknown";
+    }
+    const parts: string[] = [];
+    let current: Element | null = element;
+    for (let depth = 0; depth < MAX_SELECTOR_DEPTH && current; depth += 1) {
+      const tag = current.tagName.toLowerCase();
+      const idPart = current.id ? `#${current.id}` : "";
+      const className = current.classList.item(0);
+      const classPart = className ? `.${className}` : "";
+      parts.unshift(`${tag}${idPart}${classPart}`);
+      current = current.parentElement;
+    }
+    return parts.join(">");
+  }
+
+  function formatChunkLabel(
+    source: "body" | "iframe" | "shadow" | "semantic",
+    selector: string,
+    extra?: Record<string, string | boolean>,
+  ): string {
+    const extraEntries = Object.entries(extra ?? {})
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(" ");
+    return extraEntries.length > 0
+      ? `[source=${source} selector=${selector} ${extraEntries}]`
+      : `[source=${source} selector=${selector}]`;
+  }
+
+  function createLabeledChunk(
+    source: "body" | "iframe" | "shadow" | "semantic",
+    text: string,
+    selector: string,
+    extra?: Record<string, string | boolean>,
+  ): string | null {
+    const normalized = normalizeChunkText(text);
+    if (!normalized) {
+      return null;
+    }
+    const limitedText =
+      normalized.length > MAX_CHARS_PER_CHUNK
+        ? `${normalized.slice(0, MAX_CHARS_PER_CHUNK)}…`
+        : normalized;
+    return `${formatChunkLabel(source, selector, extra)}\n${limitedText}`;
+  }
+
+  function collectOpenShadowRootChunks(): string[] {
+    const chunks: string[] = [];
+    const visitedShadowRoots = new Set<ShadowRoot>();
+    const rootElement = document.documentElement;
+    if (!rootElement) {
+      return chunks;
+    }
+    const walker = document.createTreeWalker(rootElement, NodeFilter.SHOW_ELEMENT);
+    let scannedElements = 0;
+    while (scannedElements < MAX_DOM_SCAN_ELEMENTS) {
+      const nextNode = walker.nextNode();
+      if (!nextNode) {
+        break;
+      }
+      scannedElements += 1;
+      const element = nextNode as Element;
+      const shadowRoot = element.shadowRoot;
+      if (!shadowRoot || visitedShadowRoots.has(shadowRoot)) {
+        continue;
+      }
+      visitedShadowRoots.add(shadowRoot);
+      const chunk = createLabeledChunk(
+        "shadow",
+        shadowRoot.textContent ?? "",
+        `${elementSelectorHint(element)}>shadow-root`,
+      );
+      if (chunk) {
+        chunks.push(chunk);
+      }
+      if (chunks.length >= MAX_CHUNKS) {
+        break;
+      }
+    }
+    return chunks;
+  }
+
+  function collectSemanticChunks(): string[] {
+    const chunks: string[] = [];
+    const selector = "[aria-label], [alt], [title], input[placeholder], textarea[placeholder]";
+    const elements = Array.from(document.querySelectorAll<HTMLElement>(selector));
+    const seenValues = new Set<string>();
+    for (const element of elements) {
+      if (chunks.length >= MAX_SEMANTIC_ELEMENTS || chunks.length >= MAX_CHUNKS) {
+        break;
+      }
+      const candidates: Array<{ kind: string; value: string | null }> = [
+        { kind: "aria-label", value: element.getAttribute("aria-label") },
+        { kind: "alt", value: element.getAttribute("alt") },
+        { kind: "title", value: element.getAttribute("title") },
+        { kind: "placeholder", value: element.getAttribute("placeholder") },
+      ];
+      for (const candidate of candidates) {
+        if (!candidate.value) {
+          continue;
+        }
+        const normalized = normalizeChunkText(candidate.value);
+        if (!normalized || seenValues.has(`${candidate.kind}:${normalized}`)) {
+          continue;
+        }
+        seenValues.add(`${candidate.kind}:${normalized}`);
+        const chunk = createLabeledChunk("semantic", normalized, elementSelectorHint(element), {
+          kind: candidate.kind,
+        });
+        if (chunk) {
+          chunks.push(chunk);
+        }
+        if (chunks.length >= MAX_SEMANTIC_ELEMENTS || chunks.length >= MAX_CHUNKS) {
+          break;
+        }
+      }
+    }
+    return chunks;
+  }
+
+  function collectSnapshotTextContent(): string {
+    const chunks: string[] = [];
+    const pushChunk = (chunk: string | null): void => {
+      if (!chunk || chunks.length >= MAX_CHUNKS) {
+        return;
+      }
+      chunks.push(chunk);
+    };
+
+    pushChunk(createLabeledChunk("body", document.body?.innerText ?? "", "body"));
+
+    const iframeElements = Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe"));
+    for (const iframe of iframeElements) {
+      if (chunks.length >= MAX_CHUNKS) {
+        break;
+      }
+      try {
+        const frameBody = iframe.contentDocument?.body;
+        if (!frameBody) {
+          continue;
+        }
+        pushChunk(
+          createLabeledChunk("iframe", frameBody.innerText ?? "", elementSelectorHint(iframe), {
+            sameOrigin: true,
+          }),
+        );
+      } catch {
+        // Ignore cross-origin frame access failures.
+      }
+    }
+
+    for (const shadowChunk of collectOpenShadowRootChunks()) {
+      pushChunk(shadowChunk);
+    }
+    for (const semanticChunk of collectSemanticChunks()) {
+      pushChunk(semanticChunk);
+    }
+    return chunks.join("\n\n");
+  }
+
   function setupSnapshotLoop(): void {
     let lastHash = -1;
-    let isDirty = true;
     let isSnapshotInFlight = false;
     let pollIntervalMs = 300;
     let includeHtmlInSnapshots = false;
     let intervalId = -1;
 
-    const captureSnapshot = (reason: string, includeHtml = false): void => {
-      const textContent = document.body?.innerText ?? "";
+    const captureSnapshot = (reason: string, textContent: string, includeHtml = false): void => {
       // c8 ignore next -- html capture flag branches are exercised by browser runtime behavior.
       const htmlContent = includeHtml ? (document.documentElement?.outerHTML ?? "") : "";
       safeSendMessage({
@@ -69,14 +238,13 @@ if (!window.__recorderContentBootstrapped) {
     };
 
     const captureIfChanged = (reason: string, force = false) => {
-      const textContent = document.body?.innerText ?? "";
+      const textContent = collectSnapshotTextContent();
       const currentHash = hashText(textContent);
-      if (!force && !isDirty && currentHash === lastHash) {
+      if (!force && currentHash === lastHash) {
         return;
       }
       lastHash = currentHash;
-      isDirty = false;
-      captureSnapshot(reason, includeHtmlInSnapshots);
+      captureSnapshot(reason, textContent, includeHtmlInSnapshots);
     };
 
     const restartLoop = (): void => {
@@ -107,7 +275,7 @@ if (!window.__recorderContentBootstrapped) {
         captureIfChanged(reason, message.payload?.force ?? true);
         // c8 ignore next -- includeHtml toggle depends on caller payload shape.
         if (message.payload?.includeHtml) {
-          captureSnapshot(`${reason}.html`, true);
+          captureSnapshot(`${reason}.html`, collectSnapshotTextContent(), true);
         }
         sendResponse({ ok: true });
         return true;
@@ -129,70 +297,20 @@ if (!window.__recorderContentBootstrapped) {
       return false;
     });
 
-    const nativePushState = History.prototype.pushState;
-    if (typeof nativePushState === "function") {
-      history.pushState = (...args) => {
-        nativePushState.apply(history, args);
-        isDirty = true;
-        captureIfChanged("history.pushState");
-      };
-    }
-
-    const nativeReplaceState = History.prototype.replaceState;
-    if (typeof nativeReplaceState === "function") {
-      history.replaceState = (...args) => {
-        nativeReplaceState.apply(history, args);
-        isDirty = true;
-        captureIfChanged("history.replaceState");
-      };
-    }
-
-    window.addEventListener("popstate", () => {
-      isDirty = true;
-      captureIfChanged("popstate");
-    });
-    window.addEventListener("hashchange", () => {
-      isDirty = true;
-      captureIfChanged("hashchange");
-    });
-    window.addEventListener("click", () => {
-      isDirty = true;
-    });
-    window.addEventListener(
-      "scroll",
-      () => {
-        isDirty = true;
-      },
-      { passive: true },
-    );
-    window.addEventListener("keydown", () => {
-      isDirty = true;
-    });
-    window.addEventListener("visibilitychange", () => {
-      // c8 ignore next -- jsdom visibility APIs do not mirror browser tab lifecycle exactly.
-      if (document.visibilityState === "hidden") {
-        captureIfChanged("visibility.hidden");
-      }
-    });
     window.addEventListener("pagehide", () => {
-      captureIfChanged("pagehide");
+      captureIfChanged("pagehide", true);
     });
     window.addEventListener("beforeunload", () => {
-      captureIfChanged("beforeunload");
-    });
-    window.addEventListener("load", () => {
-      isDirty = true;
-      captureIfChanged("window.load");
+      captureIfChanged("beforeunload", true);
     });
 
     if (document.readyState === "complete" || document.readyState === "interactive") {
-      captureIfChanged("content-script-ready");
+      captureIfChanged("content-script-ready", true);
     } else {
       window.addEventListener(
         "DOMContentLoaded",
         () => {
-          isDirty = true;
-          captureIfChanged("dom-content-loaded");
+          captureIfChanged("dom-content-loaded", true);
         },
         { once: true },
       );

@@ -68,7 +68,8 @@ let recorderState: RecorderState = { ...DEFAULT_STATE };
 let recorderSettings: RecorderSettings = { ...DEFAULT_SETTINGS };
 const PAGE_TEXT_LIMIT = 50_000;
 const PAGE_HTML_LIMIT = 200_000;
-const SNAPSHOT_MIN_INTERVAL_MS = 300;
+const SNAPSHOT_MIN_INTERVAL_MS = 100;
+const CONSUMER_IDLE_SLEEP_MS = 120;
 
 type TabSnapshotState = {
   hash: number;
@@ -332,7 +333,7 @@ async function runConsumerLoop(): Promise<void> {
       }
       const next = await pollNextQueueRecord();
       if (!next) {
-        await sleep(120);
+        await sleep(CONSUMER_IDLE_SLEEP_MS);
         continue;
       }
       const raw = await getRawPage(next.rawId);
@@ -394,6 +395,313 @@ function buildExportFilename(): string {
   const base = recorderState.sessionId ?? new Date().toISOString().replaceAll(":", "-");
   const safe = base.replaceAll(/[^\w.-]/g, "_");
   return `recordings/${safe}.zip`;
+}
+
+function sanitizeZipPathPart(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "unknown";
+  }
+  const safe = trimmed.replaceAll(/[^\w.-]/g, "_");
+  return safe.length > 0 ? safe : "unknown";
+}
+
+type UrlSummary = {
+  url: string;
+  snapshotCount: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+};
+
+type WebsiteSummary = {
+  urlPrefix: string;
+  snapshotCount: number;
+  uniqueUrlCount: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  pages: UrlSummary[];
+};
+
+type SessionSummary = {
+  websiteCount: number;
+  urlCount: number;
+  snapshotCount: number;
+  startedAt: string | null;
+  endedAt: string | null;
+  durationSeconds: number | null;
+  websites: WebsiteSummary[];
+};
+
+type ExportMetadata = {
+  sessionId: string;
+  exportedAt: string;
+  pageCount: number;
+  urlCount: number;
+  summary: {
+    websitesOpened: number;
+    urlsCaptured: number;
+    snapshotCount: number;
+    startedAt: string | null;
+    endedAt: string | null;
+    durationSeconds: number | null;
+  };
+  websites: WebsiteSummary[];
+  indexText: string;
+  settings: RecorderSettings;
+};
+
+function toTimestampMs(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function durationSecondsFrom(startMs: number | null, endMs: number | null): number | null {
+  if (startMs === null || endMs === null || endMs < startMs) {
+    return null;
+  }
+  return Math.round(((endMs - startMs) / 1000) * 10) / 10;
+}
+
+function summarizeUrlRows(rows: EnrichedPageRecord[]): UrlSummary[] {
+  const byUrl = new Map<string, EnrichedPageRecord[]>();
+  for (const row of rows) {
+    const existing = byUrl.get(row.url);
+    if (existing) {
+      existing.push(row);
+    } else {
+      byUrl.set(row.url, [row]);
+    }
+  }
+  return [...byUrl.entries()]
+    .map(([url, urlRows]) => {
+      const sorted = [...urlRows].sort(
+        (a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp),
+      );
+      const startedAt = sorted[0]?.timestamp ?? null;
+      const endedAt = sorted[sorted.length - 1]?.timestamp ?? null;
+      return {
+        url,
+        snapshotCount: sorted.length,
+        startedAt,
+        endedAt,
+        durationSeconds: durationSecondsFrom(
+          startedAt ? toTimestampMs(startedAt) : null,
+          endedAt ? toTimestampMs(endedAt) : null,
+        ),
+      };
+    })
+    .sort((a, b) => b.snapshotCount - a.snapshotCount || a.url.localeCompare(b.url));
+}
+
+function buildSessionSummary(pages: EnrichedPageRecord[]): SessionSummary {
+  const byPrefix = new Map<string, EnrichedPageRecord[]>();
+  for (const page of pages) {
+    const key = page.urlPrefix || "unknown";
+    const existing = byPrefix.get(key);
+    if (existing) {
+      existing.push(page);
+    } else {
+      byPrefix.set(key, [page]);
+    }
+  }
+  const websites: WebsiteSummary[] = [...byPrefix.entries()]
+    .map(([urlPrefix, rows]) => {
+      const sorted = [...rows].sort(
+        (a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp),
+      );
+      const startedAt = sorted[0]?.timestamp ?? null;
+      const endedAt = sorted[sorted.length - 1]?.timestamp ?? null;
+      const pagesByUrl = summarizeUrlRows(sorted);
+      return {
+        urlPrefix,
+        snapshotCount: sorted.length,
+        uniqueUrlCount: pagesByUrl.length,
+        startedAt,
+        endedAt,
+        durationSeconds: durationSecondsFrom(
+          startedAt ? toTimestampMs(startedAt) : null,
+          endedAt ? toTimestampMs(endedAt) : null,
+        ),
+        pages: pagesByUrl,
+      };
+    })
+    .sort((a, b) => b.snapshotCount - a.snapshotCount || a.urlPrefix.localeCompare(b.urlPrefix));
+
+  const sortedAll = [...pages].sort(
+    (a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp),
+  );
+  const startedAt = sortedAll[0]?.timestamp ?? null;
+  const endedAt = sortedAll[sortedAll.length - 1]?.timestamp ?? null;
+
+  return {
+    websiteCount: websites.length,
+    urlCount: new Set(pages.map((page) => page.url)).size,
+    snapshotCount: pages.length,
+    startedAt,
+    endedAt,
+    durationSeconds: durationSecondsFrom(
+      startedAt ? toTimestampMs(startedAt) : null,
+      endedAt ? toTimestampMs(endedAt) : null,
+    ),
+    websites,
+  };
+}
+
+function buildSessionIndexText(
+  summary: SessionSummary,
+  sessionId: string,
+  exportedAt: string,
+): string {
+  const lines: string[] = [
+    "# Session Index",
+    `sessionId: ${sessionId}`,
+    `exportedAt: ${exportedAt}`,
+    `websitesOpened: ${summary.websiteCount}`,
+    `urlsCaptured: ${summary.urlCount}`,
+    `snapshotCount: ${summary.snapshotCount}`,
+    `startedAt: ${summary.startedAt ?? "-"}`,
+    `endedAt: ${summary.endedAt ?? "-"}`,
+    `durationSeconds: ${summary.durationSeconds ?? "-"}`,
+    "",
+    "## Websites",
+  ];
+
+  if (summary.websites.length === 0) {
+    lines.push("(none)");
+    return lines.join("\n");
+  }
+
+  for (const site of summary.websites) {
+    lines.push(`- host: ${site.urlPrefix}`);
+    lines.push(`  snapshotCount: ${site.snapshotCount}`);
+    lines.push(`  uniqueUrls: ${site.uniqueUrlCount}`);
+    lines.push(`  startedAt: ${site.startedAt ?? "-"}`);
+    lines.push(`  endedAt: ${site.endedAt ?? "-"}`);
+    lines.push(`  durationSeconds: ${site.durationSeconds ?? "-"}`);
+    lines.push("  pages:");
+    for (const page of site.pages) {
+      lines.push(`    - url: ${page.url}`);
+      lines.push(`      snapshotCount: ${page.snapshotCount}`);
+      lines.push(`      startedAt: ${page.startedAt ?? "-"}`);
+      lines.push(`      endedAt: ${page.endedAt ?? "-"}`);
+      lines.push(`      durationSeconds: ${page.durationSeconds ?? "-"}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function buildExportMetadata(params: {
+  sessionId: string;
+  exportedAt: string;
+  pageCount: number;
+  summary: SessionSummary;
+  indexText: string;
+  settings: RecorderSettings;
+}): ExportMetadata {
+  const { sessionId, exportedAt, pageCount, summary, indexText, settings } = params;
+  return {
+    sessionId,
+    exportedAt,
+    pageCount,
+    urlCount: summary.urlCount,
+    summary: {
+      websitesOpened: summary.websiteCount,
+      urlsCaptured: summary.urlCount,
+      snapshotCount: summary.snapshotCount,
+      startedAt: summary.startedAt,
+      endedAt: summary.endedAt,
+      durationSeconds: summary.durationSeconds,
+    },
+    websites: summary.websites,
+    indexText,
+    settings,
+  };
+}
+
+function buildPrefixPageTextBlocks(pages: EnrichedPageRecord[]): string {
+  return pages
+    .sort((a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp))
+    .map((page) => {
+      const lines: string[] = [
+        "---",
+        `timestamp: ${page.timestamp}`,
+        `url: ${page.url}`,
+        `title: ${page.title || "-"}`,
+        `reason: ${page.reason || "-"}`,
+        `tabId: ${page.tabId}`,
+        `windowId: ${page.windowId}`,
+        "content:",
+      ];
+      const content = (page.textContent ?? "").trim();
+      lines.push(content.length > 0 ? content : "<empty>");
+      if (page.htmlContent) {
+        lines.push("htmlContent:");
+        lines.push(page.htmlContent);
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+function hashForPath(value: string): string {
+  let hash = 0;
+  for (let idx = 0; idx < value.length; idx += 1) {
+    hash = (hash * 31 + value.charCodeAt(idx)) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function buildSafeUrlBasenameMap(urls: string[]): Map<string, string> {
+  const safeNames = new Map<string, string>();
+  const usedNames = new Set<string>();
+  const sortedUrls = [...urls].sort((a, b) => a.localeCompare(b));
+  for (const url of sortedUrls) {
+    const base = sanitizeZipPathPart(url);
+    let candidate = base;
+    if (usedNames.has(candidate)) {
+      candidate = `${base}_${hashForPath(url)}`;
+    }
+    let suffix = 1;
+    while (usedNames.has(candidate)) {
+      candidate = `${base}_${hashForPath(url)}_${suffix}`;
+      suffix += 1;
+    }
+    usedNames.add(candidate);
+    safeNames.set(url, candidate);
+  }
+  return safeNames;
+}
+
+function buildUrlTextEntries(
+  pages: EnrichedPageRecord[],
+): Array<{ filename: string; content: string }> {
+  const byPrefix = new Map<string, Map<string, EnrichedPageRecord[]>>();
+  for (const page of pages) {
+    const key = page.urlPrefix || "unknown";
+    const byUrl = byPrefix.get(key) ?? new Map<string, EnrichedPageRecord[]>();
+    const urlKey = page.url || "unknown";
+    const urlRows = byUrl.get(urlKey) ?? [];
+    urlRows.push(page);
+    byUrl.set(urlKey, urlRows);
+    byPrefix.set(key, byUrl);
+  }
+  const entries: Array<{ filename: string; content: string }> = [];
+  const sortedPrefixes = [...byPrefix.entries()].sort(([a], [b]) => a.localeCompare(b));
+  for (const [prefix, byUrl] of sortedPrefixes) {
+    const safePrefix = sanitizeZipPathPart(prefix);
+    const urls = [...byUrl.keys()];
+    const safeNames = buildSafeUrlBasenameMap(urls);
+    const sortedUrls = [...urls].sort((a, b) => a.localeCompare(b));
+    for (const url of sortedUrls) {
+      entries.push({
+        filename: `pages/${safePrefix}/${safeNames.get(url)}.txt`,
+        content: buildPrefixPageTextBlocks(byUrl.get(url) ?? []),
+      });
+    }
+  }
+  return entries;
 }
 
 async function handleStartRecording(): Promise<RecorderState> {
@@ -473,23 +781,23 @@ async function handleGetSessionStats(): Promise<SessionStats> {
     droppedPageCount: recorderState.droppedPageCount,
     requestCount: 0,
     droppedRequestCount: recorderState.droppedRequestCount,
-    hostCount: stats.urlPrefixRows.length,
+    urlCount: stats.urlRows.length,
     storageBytesInUse: stats.totals.totalBytes,
   };
 }
 
 async function handleGetHostQueueStats(): Promise<HostQueueStats> {
   const stats = await handleGetPipelineStats();
-  const hosts: HostQueueStatsRow[] = stats.urlPrefixRows.map((row) => ({
-    host: row.urlPrefix,
+  const urls: HostQueueStatsRow[] = stats.urlRows.map((row) => ({
+    url: row.url,
     mapped: true,
     queueSize: 0,
     workerActive: false,
   }));
   return {
-    distinctHostCount: hosts.length,
+    distinctUrlCount: urls.length,
     generatedAt: stats.generatedAt,
-    hosts,
+    urls,
   };
 }
 
@@ -499,7 +807,7 @@ async function handleExportSession(): Promise<{
   requestCount: number;
   droppedPageCount: number;
   droppedRequestCount: number;
-  hostCount: number;
+  urlCount: number;
 }> {
   if (recorderState.isRecording || (recorderState.isStopping ?? false)) {
     throw new Error("Stop recording before exporting.");
@@ -515,26 +823,20 @@ async function handleExportSession(): Promise<{
   }
   activeExportSessions.add(sessionId);
   try {
-    const jsonl = pages
-      .sort((a, b) => parseRecordTimestamp(a.timestamp) - parseRecordTimestamp(b.timestamp))
-      .map((row) => JSON.stringify(row))
-      .join("\n");
-    const prefixCount = new Set(pages.map((row) => row.urlPrefix)).size;
-    const metadata = JSON.stringify(
-      {
-        sessionId,
-        exportedAt: new Date().toISOString(),
-        pageCount: pages.length,
-        urlPrefixCount: prefixCount,
-        settings: recorderSettings,
-      },
-      null,
-      2,
-    );
-    const zipBytes = createZip([
-      { filename: "pages.jsonl", content: jsonl },
-      { filename: "metadata.json", content: metadata },
-    ]);
+    const urlEntries = buildUrlTextEntries(pages);
+    const exportedAt = new Date().toISOString();
+    const summary = buildSessionSummary(pages);
+    const indexText = buildSessionIndexText(summary, sessionId, exportedAt);
+    const exportMetadata = buildExportMetadata({
+      sessionId,
+      exportedAt,
+      pageCount: pages.length,
+      summary,
+      indexText,
+      settings: recorderSettings,
+    });
+    const metadata = JSON.stringify(exportMetadata, null, 2);
+    const zipBytes = createZip([...urlEntries, { filename: "metadata.json", content: metadata }]);
     await downloadZipFile(buildExportFilename(), zipBytes);
     return {
       sessionId,
@@ -542,7 +844,7 @@ async function handleExportSession(): Promise<{
       requestCount: 0,
       droppedPageCount: recorderState.droppedPageCount,
       droppedRequestCount: recorderState.droppedRequestCount,
-      hostCount: prefixCount,
+      urlCount: summary.urlCount,
     };
   } finally {
     activeExportSessions.delete(sessionId);
@@ -700,6 +1002,12 @@ export const __testHooks = {
   snapshotSignatureHash,
   shouldAppendSnapshot,
   resetSnapshotStateForSession,
+  sanitizeZipPathPart,
+  buildSessionSummary,
+  buildSessionIndexText,
+  buildExportMetadata,
+  buildPrefixPageTextBlocks,
+  buildUrlTextEntries,
   handleGetSessionStats,
   handleGetHostQueueStats,
   handleExportSession,

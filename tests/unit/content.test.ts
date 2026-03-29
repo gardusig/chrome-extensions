@@ -17,6 +17,14 @@ describe("content script", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.useFakeTimers();
+    Object.defineProperty(document, "body", {
+      configurable: true,
+      value: document.querySelector("body") ?? document.createElement("body"),
+    });
+    Object.defineProperty(document, "documentElement", {
+      configurable: true,
+      value: document.querySelector("html") ?? document.createElement("html"),
+    });
     document.body.innerHTML = "<main>Hello recorder</main>";
     document.title = "Test page";
     window.history.replaceState({}, "", "/path");
@@ -126,10 +134,10 @@ describe("content script", () => {
 
   it("handles loading readyState path and unknown runtime messages", async () => {
     const chromeMock = createChromeMock() as ChromeMockWithInternals;
-    vi.spyOn(chromeMock.runtime, "sendMessage").mockResolvedValue({
+    vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async () => ({
       ok: true,
       settings: { pollIntervalMs: 300, savePageHtml: false },
-    });
+    }));
     globalThis.chrome = chromeMock;
 
     Object.defineProperty(document, "readyState", { configurable: true, value: "loading" });
@@ -151,5 +159,93 @@ describe("content script", () => {
     const listener = chromeMock.__runtimeListeners.at(-1)!;
     const unknown = listener({ type: "UNKNOWN" }, {}, () => undefined);
     expect(unknown).toBe(false);
+  });
+
+  it("captures labeled chunks from semantic, shadow, and iframe sources", async () => {
+    const chromeMock = createChromeMock() as ChromeMockWithInternals;
+    const sentMessages: Array<{ type?: string; payload?: { textContent?: string } }> = [];
+    vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async (message: unknown) => {
+      const typed = message as { type?: string; payload?: { textContent?: string } };
+      if (typed.type === "GET_SETTINGS") {
+        return { ok: true, settings: { pollIntervalMs: 100, savePageHtml: false } };
+      }
+      sentMessages.push(typed);
+      return { ok: true };
+    });
+    globalThis.chrome = chromeMock;
+
+    document.body.innerHTML = `
+      <button aria-label="Send message">Send</button>
+      <iframe id="frame-a"></iframe>
+      <div id="shadow-host"></div>
+    `;
+    const frame = document.querySelector("iframe#frame-a")!;
+    Object.defineProperty(frame, "contentDocument", {
+      configurable: true,
+      get: () => ({
+        body: {
+          innerText: "iframe text",
+        },
+      }),
+    });
+    const host = document.querySelector("#shadow-host") as HTMLElement;
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = "<p>shadow text</p>";
+    Object.defineProperty(document.body, "innerText", {
+      configurable: true,
+      get: () => "body text",
+    });
+
+    window.__recorderContentBootstrapped = undefined;
+    vi.resetModules();
+    await import("../../src/content.ts");
+    vi.advanceTimersByTime(120);
+
+    const snapshots = sentMessages.filter((item) => item.type === "CONTENT_PAGE_SNAPSHOT");
+    expect(snapshots.length).toBeGreaterThan(0);
+    const textPayload = snapshots.at(-1)?.payload?.textContent ?? "";
+    expect(textPayload).toContain("[source=body selector=body]");
+    expect(textPayload).toContain("body text");
+    expect(textPayload).toContain("[source=iframe");
+    expect(textPayload).toContain("iframe text");
+    expect(textPayload).toContain("[source=shadow");
+    expect(textPayload).toContain("shadow text");
+    expect(textPayload).toContain("[source=semantic");
+    expect(textPayload).toContain("Send message");
+  });
+
+  it("ignores cross-origin iframe errors while capturing", async () => {
+    const chromeMock = createChromeMock() as ChromeMockWithInternals;
+    const sentMessages: Array<{ type?: string; payload?: { textContent?: string } }> = [];
+    vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async (message: unknown) => {
+      const typed = message as { type?: string; payload?: { textContent?: string } };
+      if (typed.type === "GET_SETTINGS") {
+        return { ok: true, settings: { pollIntervalMs: 100, savePageHtml: false } };
+      }
+      sentMessages.push(typed);
+      return { ok: true };
+    });
+    globalThis.chrome = chromeMock;
+
+    document.body.innerHTML = `<iframe id="frame-throws"></iframe>`;
+    const throwingFrame = document.querySelector("iframe#frame-throws")!;
+    Object.defineProperty(throwingFrame, "contentDocument", {
+      configurable: true,
+      get: () => {
+        throw new Error("cross-origin");
+      },
+    });
+    Object.defineProperty(document.body, "innerText", {
+      configurable: true,
+      get: () => "body only",
+    });
+
+    window.__recorderContentBootstrapped = undefined;
+    vi.resetModules();
+    await import("../../src/content.ts");
+    vi.advanceTimersByTime(120);
+
+    const snapshot = sentMessages.find((item) => item.type === "CONTENT_PAGE_SNAPSHOT");
+    expect(snapshot?.payload?.textContent ?? "").toContain("body only");
   });
 });

@@ -63,7 +63,7 @@ describe("options", () => {
         totalBytes: 1024 * 1024,
         estimatedCompressedBytes: 512 * 1024,
       },
-      urlPrefixRows: [{ urlPrefix: "app.slack.com", pageCount: 8, bytes: 900_000 }],
+      urlRows: [{ url: "https://app.slack.com/client/T123/C456", pageCount: 8, bytes: 900_000 }],
       generatedAt: "2026-03-28T22:00:00.000Z",
     };
 
@@ -117,7 +117,7 @@ describe("options", () => {
         totalBytes: 512,
         estimatedCompressedBytes: 0,
       },
-      urlPrefixRows: [],
+      urlRows: [],
       generatedAt: "invalid-date",
     };
 
@@ -184,5 +184,19 @@ describe("options", () => {
     document.body.innerHTML = "";
     vi.resetModules();
     await expect(import("../../src/options.ts")).rejects.toThrow("Missing options DOM elements.");
+  });
+
+  it("surfaces initialization error when GET_SETTINGS fails", async () => {
+    const chromeMock = createChromeMock();
+    vi.spyOn(chromeMock.runtime, "sendMessage").mockResolvedValue({
+      ok: false,
+      error: "settings unavailable",
+    });
+    globalThis.chrome = chromeMock;
+
+    vi.resetModules();
+    await import("../../src/options.ts");
+    await flushMicrotasks();
+    expect(document.querySelector("#message")?.textContent).toContain("settings unavailable");
   });
 });

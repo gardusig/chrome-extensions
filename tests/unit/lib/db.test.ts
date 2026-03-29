@@ -116,7 +116,9 @@ describe("db memory fallback", () => {
     });
     expect(stats.totals.rawCount).toBe(1);
     expect(stats.totals.enrichedCount).toBe(1);
-    expect(stats.urlPrefixRows).toEqual([{ urlPrefix: "example.com", pageCount: 1, bytes: 256 }]);
+    expect(stats.urlRows).toEqual([
+      { url: "https://example.com/enriched-2", pageCount: 1, bytes: 256 },
+    ]);
 
     await db.clearAllCaptureData();
     const afterClear = await db.readPipelineStats((bytes) => bytes);

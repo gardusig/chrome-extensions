@@ -11,9 +11,10 @@ Snapshots are queued, enriched, and exported as a downloadable session zip.
 
 ## Features
 
-- Captures accumulated page content after recording starts, based on tab interactions and polling changes.
+- Captures accumulated page content after recording starts via fast per-tab polling and close-time flush attempts.
+- Produces labeled text chunks (body, same-origin iframes, open shadow roots, semantic labels) for easier downstream parsing.
 - Uses a background processing queue to dedupe and enrich snapshots before export.
-- Exports a zip with canonical JSONL snapshots and metadata.
+- Exports a zip with one text file per URL prefix plus metadata.
 - Includes quick popup presets and advanced options for filters and storage limits.
 
 ## Architecture at a Glance
@@ -67,7 +68,7 @@ npm run format:local
 ## Usage
 
 1. Open extension popup and click **Start**.
-2. Recorder starts listening on open tabs and appends snapshots after post-start interactions/changes.
+2. Recorder starts one polling loop per open tab (minimum 100ms), collects labeled text snapshots, and appends new snapshots when content changes.
 3. Navigate pages normally in Chrome.
 4. Click **Stop** when done.
 5. Click **Export Session** to download `recordings/<sessionId>.zip` to your Downloads folder.
@@ -92,8 +93,8 @@ npm run format:local
 - Popup has **Open all settings** for advanced filters and safe quota limits (`6/8/9/10 MB`).
 - Export creates a zip in Downloads as `recordings/<sessionId>.zip`.
 - Zip contents include:
-  - `pages.jsonl` (canonical enriched page snapshots)
-  - `metadata.json` (session id, export timestamp, counts, settings)
+  - `pages/<urlPrefix>/<fullUrl>.txt` (chronological structured text blocks, one file per full URL nested under prefix folders)
+  - `metadata.json` (session id, export timestamp, counts including `urlCount`, summary, per-website stats, embedded `indexText`, settings)
 - Repository includes `recordings/.gitkeep` to reserve a local recordings folder for future shared tooling.
 
 See [`docs/recording-format.md`](docs/recording-format.md) for schema details.

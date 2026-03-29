@@ -20,8 +20,8 @@ const queueProcessedEl = document.querySelector<HTMLElement>("#queue-processed")
 const totalBytesEl = document.querySelector<HTMLElement>("#total-bytes");
 const compressedBytesEl = document.querySelector<HTMLElement>("#compressed-bytes");
 const queueUpdatedAtEl = document.querySelector<HTMLElement>("#queue-updated-at");
-const prefixTableBodyEl = document.querySelector<HTMLTableSectionElement>("#prefix-table-body");
-const prefixEmptyEl = document.querySelector<HTMLElement>("#prefix-empty");
+const urlTableBodyEl = document.querySelector<HTMLTableSectionElement>("#prefix-table-body");
+const urlEmptyEl = document.querySelector<HTMLElement>("#prefix-empty");
 const messageEl = document.querySelector<HTMLDivElement>("#message");
 let diagnosticsPollTimer: number | null = null;
 
@@ -42,8 +42,8 @@ function assertElements(): void {
     !totalBytesEl ||
     !compressedBytesEl ||
     !queueUpdatedAtEl ||
-    !prefixTableBodyEl ||
-    !prefixEmptyEl ||
+    !urlTableBodyEl ||
+    !urlEmptyEl ||
     !messageEl
   ) {
     throw new Error("Missing options DOM elements.");
@@ -121,20 +121,20 @@ function renderPipelineStats(stats: PipelineStats): void {
     ? "Updated: --"
     : `Updated: ${updatedAt.toLocaleTimeString()}`;
 
-  prefixTableBodyEl!.innerHTML = "";
-  if (stats.urlPrefixRows.length === 0) {
-    prefixEmptyEl!.style.display = "";
+  urlTableBodyEl!.innerHTML = "";
+  if (stats.urlRows.length === 0) {
+    urlEmptyEl!.style.display = "";
     return;
   }
-  prefixEmptyEl!.style.display = "none";
-  for (const row of stats.urlPrefixRows) {
+  urlEmptyEl!.style.display = "none";
+  for (const row of stats.urlRows) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td style="padding: 6px 4px; border-top: 1px solid rgba(125,125,125,0.25)">${row.urlPrefix}</td>
+      <td style="padding: 6px 4px; border-top: 1px solid rgba(125,125,125,0.25)">${row.url}</td>
       <td style="padding: 6px 4px; border-top: 1px solid rgba(125,125,125,0.25); text-align: right">${row.pageCount}</td>
       <td style="padding: 6px 4px; border-top: 1px solid rgba(125,125,125,0.25); text-align: right">${bytesToHuman(row.bytes)}</td>
     `;
-    prefixTableBodyEl!.appendChild(tr);
+    urlTableBodyEl!.appendChild(tr);
   }
 }
 

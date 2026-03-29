@@ -57,8 +57,8 @@ export type PipelineStats = {
     totalBytes: number;
     estimatedCompressedBytes: number;
   };
-  urlPrefixRows: Array<{
-    urlPrefix: string;
+  urlRows: Array<{
+    url: string;
     pageCount: number;
     bytes: number;
   }>;
@@ -372,12 +372,13 @@ export async function readPipelineStats(
   const queueProcessing = queueRows.filter((row) => row.status === "processing").length;
   const queueFailed = queueRows.filter((row) => row.status === "failed").length;
 
-  const byPrefix = new Map<string, { pageCount: number; bytes: number }>();
+  const byUrl = new Map<string, { pageCount: number; bytes: number }>();
   for (const row of enrichedRows) {
-    const current = byPrefix.get(row.urlPrefix) ?? { pageCount: 0, bytes: 0 };
+    const key = row.url || "unknown";
+    const current = byUrl.get(key) ?? { pageCount: 0, bytes: 0 };
     current.pageCount += 1;
     current.bytes += row.contentSizeBytes;
-    byPrefix.set(row.urlPrefix, current);
+    byUrl.set(key, current);
   }
 
   const rawBytes = rawRows.reduce((sum, row) => sum + row.contentSizeBytes, 0);
@@ -397,13 +398,13 @@ export async function readPipelineStats(
       totalBytes,
       estimatedCompressedBytes: estimateCompressedBytes(totalBytes),
     },
-    urlPrefixRows: [...byPrefix.entries()]
-      .map(([urlPrefix, values]) => ({
-        urlPrefix,
+    urlRows: [...byUrl.entries()]
+      .map(([url, values]) => ({
+        url,
         pageCount: values.pageCount,
         bytes: values.bytes,
       }))
-      .sort((a, b) => b.pageCount - a.pageCount || a.urlPrefix.localeCompare(b.urlPrefix)),
+      .sort((a, b) => b.pageCount - a.pageCount || a.url.localeCompare(b.url)),
     generatedAt: new Date().toISOString(),
   };
 }

@@ -6,27 +6,22 @@ Recorder stores capture data in IndexedDB during recording, and exports a zip fi
 
 Zip entries:
 
-- `pages.jsonl` (canonical structured page snapshots)
+- `pages/<urlPrefix>/<fullUrl>.txt` (one text file per full URL)
 - `metadata.json` (session/export metadata)
 
-## `pages.jsonl` Format
+Within each page file, snapshots are sorted by `timestamp` (oldest first).
 
-Each line is one snapshot object with:
+## Page Text Entry Format
 
-- `id`
-- `createdAt`
+Each snapshot block contains:
+
 - `timestamp`
-- `title`
 - `url`
-- `urlPrefix`
-- `tabId`, `windowId`
+- `title`
 - `reason`
-- optional `textContent` (`document.body.innerText`, if enabled)
-- optional `htmlContent` (`document.documentElement.outerHTML`, if enabled)
-- `sectionCount`
-- `contentSizeBytes`
-
-Rows are sorted by `timestamp` before export.
+- `tabId`, `windowId`
+- `content` (captured text, when enabled)
+- optional `htmlContent` (captured HTML, when enabled)
 
 ## Redaction Defaults
 
@@ -39,7 +34,10 @@ URL query params containing sensitive key names are redacted as `[REDACTED]` in 
 - `sessionId`
 - `exportedAt`
 - `pageCount`
-- `urlPrefixCount`
+- `urlCount`
+- `summary` (counts + start/end/duration)
+- `websites` (per-prefix aggregate stats with nested per-URL aggregates)
+- `indexText`
 - `settings` (effective recorder settings at export time)
 
 ## MVP Constraints

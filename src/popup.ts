@@ -55,7 +55,7 @@ function renderState(state: RecorderState): void {
 
 function renderStats(stats: SessionStats): void {
   const storageMb = (stats.storageBytesInUse / (1024 * 1024)).toFixed(2);
-  statsEl!.textContent = `Pages: ${stats.pageCount} | Prefixes: ${stats.hostCount} | Storage: ${storageMb} MB`;
+  statsEl!.textContent = `Pages: ${stats.pageCount} | URLs: ${stats.urlCount} | Storage: ${storageMb} MB`;
 }
 
 function setBusy(nextBusy: boolean): void {
@@ -134,13 +134,13 @@ function wireEvents(): void {
       const response = await sendMessage<{
         sessionId: string;
         pageCount: number;
-        hostCount: number;
+        urlCount: number;
       }>("EXPORT_SESSION");
       if (!response.ok) {
         throw new Error(response.error ?? "Export failed.");
       }
       setMessage(
-        `Exported ${response.pageCount ?? 0} pages from ${response.hostCount ?? 0} prefixes into one zip file.`,
+        `Exported ${response.pageCount ?? 0} pages from ${response.urlCount ?? 0} URLs into one zip file.`,
       );
       await refreshStats();
     });

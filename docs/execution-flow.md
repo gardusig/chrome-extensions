@@ -1,6 +1,6 @@
 # Recorder Execution Flow
 
-This document describes the capture pipeline from `Start` to export, including per-tab dedupe and the canonical JSONL contract.
+This document describes the capture pipeline from `Start` to export, including per-tab dedupe and the canonical per-URL text export contract.
 
 ## Runtime Flow
 
@@ -47,31 +47,25 @@ exportZip --> downloads[Chrome Downloads API]
 - Default poll interval is `300ms`.
 - Settings updates are pushed to open tabs and applied without reload.
 
-## Canonical JSONL Snapshot Contract
+## Canonical Export Contract
 
-Export writes `recordings/<sessionId>.zip`, which contains `pages.jsonl`.
-Each line in `pages.jsonl` is one enriched snapshot object:
+Export writes `recordings/<sessionId>.zip` with:
 
-```json
-{
-  "id": "f4d1747a-4f93-45f2-a8f0-a0e8f91f8cb0",
-  "createdAt": "2026-03-28T19:15:11.389Z",
-  "timestamp": "2026-03-28T19:15:10.910Z",
-  "tabId": 123,
-  "windowId": 456,
-  "url": "https://app.slack.com/client/E04MEK4FQTF",
-  "urlPrefix": "app.slack.com",
-  "title": "Slack",
-  "reason": "poll-diff",
-  "textContent": "Search VTEX ...",
-  "htmlContent": "<html>...</html>",
-  "sectionCount": 2,
-  "contentSizeBytes": 28671
-}
-```
+- `pages/<urlPrefix>/<fullUrl>.txt`
+- `metadata.json`
 
-Notes:
+Each page text file stores chronological snapshot blocks with fields such as:
 
-- `textContent` exists when page text capture is enabled.
-- `htmlContent` exists when HTML capture is enabled.
-- `sectionCount` reflects parser output count used by diagnostics.
+- `timestamp`
+- `url`
+- `title`
+- `reason`
+- `tabId`, `windowId`
+- `content` (when page text capture is enabled)
+- optional `htmlContent` (when HTML capture is enabled)
+
+`metadata.json` includes:
+
+- `sessionId`, `exportedAt`, `pageCount`, `urlCount`
+- `summary` and per-prefix `websites` aggregates
+- embedded `indexText` and effective `settings`

@@ -6,7 +6,8 @@ on:
   pull_request:
 
 jobs:
-  quality:
+  verification:
+    name: Verification (format, lint, types, tests, build)
     runs-on: ubuntu-latest
 
     steps:

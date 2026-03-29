@@ -43,22 +43,20 @@ To create a clear test trace:
 2. Click **Stop**.
 3. Click **Export Session**.
 
-Chrome downloads files with paths like:
+Chrome downloads a zip file like:
 
-- `recordings/<sessionId>/session-metadata.json`
-- `recordings/<sessionId>/pages/<host>.txt`
-- `recordings/<sessionId>/pages/<host>.jsonl`
-- `recordings/<sessionId>/requests/<host>.txt` (if enabled)
+- `recordings/<sessionId>.zip`
 
-In Finder, open your Downloads folder and inspect those files.
+In Finder, open your Downloads folder, unzip it, and inspect:
+
+- `pages.jsonl`
+- `metadata.json`
 
 ## 6) What to expect in files
 
-- Page files (`.txt`) are grouped by host (for example, `app.slack.com.txt`).
-- JSONL page files (`.jsonl`) are canonical for AI/tooling ingestion.
-- Each page file includes multiple snapshots with URL/title/timestamp/reason and captured page text.
-- If page HTML capture is enabled, snapshots also include full HTML.
-- If request capture is enabled, request files are exported by host.
+- `pages.jsonl` is canonical for AI/tooling ingestion.
+- Each line includes snapshot fields like URL/title/timestamp/reason plus capture content.
+- If page HTML capture is enabled, rows include `htmlContent`.
 - Sensitive query parameters in URLs are redacted by default as `[REDACTED]`.
 
 ## Troubleshooting

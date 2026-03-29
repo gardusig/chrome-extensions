@@ -4,6 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PipelineStats, RecorderSettings } from "../../src/lib/schema";
 import { createChromeMock } from "../support/chrome-mocks";
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function mountOptionsDom(): void {
   document.body.innerHTML = `
     <input id="save-page-text" type="checkbox" />
@@ -79,7 +85,7 @@ describe("options", () => {
 
     vi.resetModules();
     await import("../../src/options.ts");
-    await Promise.resolve();
+    await flushMicrotasks();
 
     expect(document.querySelector("#queue-pending")!.textContent).toBe("2");
     expect(document.querySelectorAll("#prefix-table-body tr").length).toBe(1);
@@ -87,7 +93,96 @@ describe("options", () => {
     const savePageHtmlEl = document.querySelector("#save-page-html") as HTMLInputElement;
     savePageHtmlEl.checked = true;
     savePageHtmlEl.dispatchEvent(new Event("change"));
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(savePageHtmlEl.checked).toBe(true);
+  });
+
+  it("handles persistence failures, clamp logic, presets, and unload cleanup", async () => {
+    const baseSettings: RecorderSettings = {
+      preset: "full_capture",
+      hardLimitMb: 8,
+      autoExportOnSoftLimit: false,
+      pollIntervalMs: 350,
+      forceInitialScanOnStart: false,
+      savePageText: true,
+      savePageHtml: true,
+      saveRequestData: true,
+      savePageMeta: true,
+    };
+    const emptyStats: PipelineStats = {
+      queue: { pending: 0, processing: 0, failed: 0, processed: 0 },
+      totals: {
+        rawCount: 0,
+        enrichedCount: 0,
+        totalBytes: 512,
+        estimatedCompressedBytes: 0,
+      },
+      urlPrefixRows: [],
+      generatedAt: "invalid-date",
+    };
+
+    const chromeMock = createChromeMock();
+    const sendMessageSpy = vi
+      .spyOn(chromeMock.runtime, "sendMessage")
+      .mockImplementation(async (message: unknown) => {
+        const request = message as { type?: string; payload?: Partial<RecorderSettings> };
+        if (request.type === "GET_SETTINGS") {
+          return { ok: true, settings: baseSettings };
+        }
+        if (request.type === "GET_PIPELINE_STATS") {
+          return { ok: true, stats: emptyStats };
+        }
+        if (request.type === "UPDATE_SETTINGS") {
+          if (request.payload?.savePageText === false) {
+            return { ok: false, error: "Unable to save settings." };
+          }
+          return { ok: true, settings: { ...baseSettings, ...request.payload } };
+        }
+        return { ok: true };
+      });
+    globalThis.chrome = chromeMock;
+
+    vi.resetModules();
+    await import("../../src/options.ts");
+    await flushMicrotasks();
+
+    const saveTextEl = document.querySelector("#save-page-text") as HTMLInputElement;
+    saveTextEl.checked = false;
+    saveTextEl.dispatchEvent(new Event("change"));
+    await flushMicrotasks();
+    expect(document.querySelector("#message")?.textContent).toContain("Unable to save settings");
+
+    const pollIntervalEl = document.querySelector("#poll-interval") as HTMLInputElement;
+    pollIntervalEl.value = "10";
+    pollIntervalEl.dispatchEvent(new Event("change"));
+    await flushMicrotasks();
+    expect(pollIntervalEl.value).toBe("100");
+
+    const presetBtn = document.querySelector('[data-preset="pages_requests"]') as HTMLButtonElement;
+    presetBtn.click();
+    await flushMicrotasks();
+
+    const derivePresetBtn = document.querySelector("#derive-preset") as HTMLButtonElement;
+    (document.querySelector("#save-page-html") as HTMLInputElement).checked = false;
+    (document.querySelector("#save-request-data") as HTMLInputElement).checked = false;
+    derivePresetBtn.click();
+    await flushMicrotasks();
+
+    expect(sendMessageSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "UPDATE_SETTINGS" }),
+    );
+    expect((document.querySelector("#prefix-empty") as HTMLElement).style.display).toBe("");
+    expect(document.querySelector("#queue-updated-at")?.textContent).toContain("Updated: --");
+    expect(document.querySelector("#total-bytes")?.textContent).toContain("B");
+
+    window.dispatchEvent(new Event("unload"));
+  });
+
+  it("throws when required options DOM elements are missing", async () => {
+    const chromeMock = createChromeMock();
+    globalThis.chrome = chromeMock;
+    document.body.innerHTML = "";
+    vi.resetModules();
+    await expect(import("../../src/options.ts")).rejects.toThrow("Missing options DOM elements.");
   });
 });

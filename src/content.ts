@@ -25,7 +25,6 @@ type ContentUpdateSettingsMessage = {
 
 type IncomingMessage = CaptureNowMessage | ContentUpdateSettingsMessage;
 
-// c8 ignore next -- bootstrap guard is runtime-only and not re-entered in production.
 if (!window.__recorderContentBootstrapped) {
   window.__recorderContentBootstrapped = true;
 

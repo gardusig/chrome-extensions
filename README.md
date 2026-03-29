@@ -7,14 +7,28 @@
 
 MVP Chrome extension that records browser tab activity, focused on accumulated page content.
 
-Snapshots are grouped by session and exported per host as both text and JSONL files.
+Snapshots are queued, enriched, and exported as a downloadable session zip.
 
 ## Features
 
 - Captures accumulated page content after recording starts, based on tab interactions and polling changes.
-- Exports one page file per hostname (`pages/<host>.txt`) plus canonical JSONL (`pages/<host>.jsonl`).
-- Supports optional request capture and export (`requests/<host>.txt`) in advanced settings.
+- Uses a background processing queue to dedupe and enrich snapshots before export.
+- Exports a zip with canonical JSONL snapshots and metadata.
 - Includes quick popup presets and advanced options for filters and storage limits.
+
+## Architecture at a Glance
+
+```mermaid
+flowchart LR
+popup[Popup UI] --> bg[Background Worker]
+options[Options UI] --> bg
+content[Content Script] -->|CONTENT_PAGE_SNAPSHOT| bg
+bg --> raw[(raw_pages)]
+bg --> queue[(page_queue)]
+bg --> enriched[(enriched_pages)]
+bg --> zip[Zip Export]
+zip --> download[Chrome Downloads]
+```
 
 ## Requirements
 
@@ -56,7 +70,7 @@ npm run format:local
 2. Recorder starts listening on open tabs and appends snapshots after post-start interactions/changes.
 3. Navigate pages normally in Chrome.
 4. Click **Stop** when done.
-5. Click **Export Session** to download artifacts to your Downloads folder under `recordings/<sessionId>/...`.
+5. Click **Export Session** to download `recordings/<sessionId>.zip` to your Downloads folder.
 
 You can also click **Clear Session Data** to reset local captured records.
 
@@ -72,13 +86,14 @@ npm run format:local
 
 ## Storage and Files
 
-- In-memory/session data is kept in `chrome.storage.local` while recording.
-- Recorder enforces storage limits and drops oldest records first when near quota.
+- Capture pipeline data is stored in IndexedDB (`raw_pages`, `page_queue`, `enriched_pages`).
+- Recorder enforces a hard size limit and drops new snapshots once the limit is reached.
 - Popup offers short capture presets (`Pages only`, `Pages + requests`, `Full capture`).
 - Popup has **Open all settings** for advanced filters and safe quota limits (`6/8/9/10 MB`).
-- Export creates one page file per host for the session (for example, `pages/github.com.txt`).
-- Export also creates one JSONL page file per host (for example, `pages/github.com.jsonl`) for LLM-friendly ingestion.
-- When request capture is enabled in advanced settings, export also includes `requests/<host>.txt`.
+- Export creates a zip in Downloads as `recordings/<sessionId>.zip`.
+- Zip contents include:
+  - `pages.jsonl` (canonical enriched page snapshots)
+  - `metadata.json` (session id, export timestamp, counts, settings)
 - Repository includes `recordings/.gitkeep` to reserve a local recordings folder for future shared tooling.
 
 See [`docs/recording-format.md`](docs/recording-format.md) for schema details.

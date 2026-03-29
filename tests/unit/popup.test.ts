@@ -4,6 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecorderState, SessionStats } from "../../src/lib/schema";
 import { createChromeMock } from "../support/chrome-mocks";
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function mountPopupDom(): void {
   document.body.innerHTML = `
     <div id="status"></div>
@@ -77,7 +83,7 @@ describe("popup", () => {
 
     vi.resetModules();
     await import("../../src/popup.ts");
-    await Promise.resolve();
+    await flushMicrotasks();
 
     expect((document.querySelector("#export-btn") as HTMLButtonElement).disabled).toBe(true);
 
@@ -94,5 +100,83 @@ describe("popup", () => {
     document.body.innerHTML = "";
     vi.resetModules();
     await expect(import("../../src/popup.ts")).rejects.toThrow("Popup DOM elements are missing.");
+  });
+
+  it("handles start/export/clear/open-settings and surfaces action errors", async () => {
+    const state: RecorderState = {
+      isRecording: false,
+      isStopping: false,
+      sessionId: "session-2",
+      startedAt: "2026-01-02T00:00:00.000Z",
+      stoppedAt: "2026-01-02T00:01:00.000Z",
+      droppedPageCount: 0,
+      droppedRequestCount: 0,
+      storageBytesInUse: 512,
+    };
+    const stats: SessionStats = {
+      sessionId: "session-2",
+      pageCount: 1,
+      droppedPageCount: 0,
+      requestCount: 0,
+      droppedRequestCount: 0,
+      hostCount: 1,
+      storageBytesInUse: 512,
+    };
+
+    const chromeMock = createChromeMock();
+    vi.spyOn(chromeMock.runtime, "openOptionsPage").mockResolvedValue(undefined);
+    const sendMessageSpy = vi
+      .spyOn(chromeMock.runtime, "sendMessage")
+      .mockImplementation(async (message: unknown) => {
+        const type = (message as { type?: string }).type;
+        if (type === "GET_STATE") {
+          return { ok: true, state };
+        }
+        if (type === "GET_SESSION_STATS") {
+          return { ok: true, stats };
+        }
+        if (type === "START_RECORDING") {
+          return { ok: false, error: "start failed" };
+        }
+        if (type === "EXPORT_SESSION") {
+          return { ok: true, sessionId: "session-2", pageCount: 5, hostCount: 3 };
+        }
+        if (type === "CLEAR_SESSION_DATA") {
+          return { ok: true };
+        }
+        return { ok: true, state };
+      });
+    globalThis.chrome = chromeMock;
+
+    vi.resetModules();
+    await import("../../src/popup.ts");
+    await flushMicrotasks();
+
+    (document.querySelector("#start-btn") as HTMLButtonElement).click();
+    await flushMicrotasks();
+    expect(document.querySelector("#message")?.textContent).toContain("start failed");
+
+    (document.querySelector("#clear-btn") as HTMLButtonElement).click();
+    await flushMicrotasks();
+    expect(sendMessageSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "CLEAR_SESSION_DATA" }),
+    );
+  });
+
+  it("shows fetch-state error and refreshes from periodic timer", async () => {
+    const chromeMock = createChromeMock();
+    const sendMessageSpy = vi
+      .spyOn(chromeMock.runtime, "sendMessage")
+      .mockResolvedValue({ ok: false, error: "state unavailable" });
+    globalThis.chrome = chromeMock;
+
+    vi.resetModules();
+    await import("../../src/popup.ts");
+    await flushMicrotasks();
+
+    expect(document.querySelector("#message")?.textContent).toContain("state unavailable");
+    vi.advanceTimersByTime(1_000);
+    expect(sendMessageSpy).toHaveBeenCalled();
+    window.dispatchEvent(new Event("unload"));
   });
 });

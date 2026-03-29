@@ -1,67 +1,49 @@
 # Recording Format (MVP)
 
-Recorder stores data in Chrome extension local storage during capture, and exports files into your Downloads folder using a `recordings/<sessionId>/...` path.
+Recorder stores capture data in IndexedDB during recording, and exports a zip file into your Downloads folder as `recordings/<sessionId>.zip`.
 
-## Session Structure
+## Export Structure
 
-- `recordings/<sessionId>/session-metadata.json`
-- `recordings/<sessionId>/pages/<host>.txt`
-- `recordings/<sessionId>/pages/<host>.jsonl` (canonical structured page snapshots)
-- `recordings/<sessionId>/requests/<host>.txt` (only when request capture is enabled)
+Zip entries:
 
-During recording, the extension also tracks per-session host keys in storage under `recorder:host-index`.
+- `pages.jsonl` (canonical structured page snapshots)
+- `metadata.json` (session/export metadata)
 
-## Page Snapshot File Format
+## `pages.jsonl` Format
 
-Each host file starts with host metadata:
+Each line is one snapshot object with:
 
-- `Host`
-- `snapshotCount`
-
-Then repeated snapshot entries, each including:
-
+- `id`
+- `createdAt`
 - `timestamp`
 - `title`
 - `url`
+- `urlPrefix`
 - `tabId`, `windowId`
 - `reason`
-- optional `sections` block with parser-separated chunks and indented lines
-- blank line + captured page text (`document.body.innerText`, if enabled)
-- optional full HTML (`document.documentElement.outerHTML`, if enabled)
+- optional `textContent` (`document.body.innerText`, if enabled)
+- optional `htmlContent` (`document.documentElement.outerHTML`, if enabled)
+- `sectionCount`
+- `contentSizeBytes`
 
-## Request File Format (Optional)
-
-When request capture is enabled:
-
-- Files are grouped by host.
-- Entries include:
-  - `timestamp`
-  - `method`
-  - `type`
-  - `url` (redacted query params)
-  - `tabId`, `windowId`
-  - `initiator` (if available)
+Rows are sorted by `timestamp` before export.
 
 ## Redaction Defaults
 
-URL query params containing sensitive key names are redacted as `[REDACTED]` in both page and request data.
+URL query params containing sensitive key names are redacted as `[REDACTED]` in captured page metadata.
 
-## Canonical JSONL Contract
+## `metadata.json` Format
 
-The JSONL page export is the source of truth for machine parsing. Each line contains one snapshot object:
+`metadata.json` includes:
 
 - `sessionId`
-- `timestamp`
-- `tabId`, `windowId`
-- `url`, `title`, `reason`
-- `sections`: array of `{ title, lines }`
-- `text` (optional)
-- `html` (optional)
-
-Use `pages/<host>.txt` for human reading and `pages/<host>.jsonl` for LLM and tooling pipelines.
+- `exportedAt`
+- `pageCount`
+- `urlPrefixCount`
+- `settings` (effective recorder settings at export time)
 
 ## MVP Constraints
 
-- Local capture uses `chrome.storage.local` with a quota-aware eviction policy; oldest request/page records may be dropped first when near limit.
+- Local capture uses IndexedDB and enforces a hard byte limit.
 - Recommended safe hard limits without `unlimitedStorage` permission: `6/8/9/10 MB`.
-- Export is lock-guarded per session and files are overwritten per host to avoid duplicate `(<n>)` artifacts.
+- Export is lock-guarded per session id to prevent concurrent duplicate exports.

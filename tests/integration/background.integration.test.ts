@@ -15,6 +15,69 @@ type ChromeMockWithInternals = typeof chrome & {
 type SnapshotResponse = { ok: boolean; ignored?: boolean };
 type StateResponse = { ok: boolean; state?: RecorderState; error?: string };
 
+function decodeDataUrlBytes(dataUrl: string): Uint8Array {
+  const match = dataUrl.match(/^data:application\/zip;base64,(.+)$/);
+  if (!match) {
+    throw new Error("Expected zip data URL");
+  }
+  const binary = atob(match[1]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function readU16LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readU32LE(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24)) >>>
+    0
+  );
+}
+
+function parseStoredZipEntries(bytes: Uint8Array): Map<string, string> {
+  const textDecoder = new TextDecoder();
+  const entries = new Map<string, string>();
+  let offset = 0;
+  const localHeaderSignature = 0x04034b50;
+
+  while (offset + 30 <= bytes.length) {
+    if (readU32LE(bytes, offset) !== localHeaderSignature) {
+      break;
+    }
+    const compressionMethod = readU16LE(bytes, offset + 8);
+    if (compressionMethod !== 0) {
+      throw new Error(`Unsupported compression method in test parser: ${compressionMethod}`);
+    }
+    const fileNameLength = readU16LE(bytes, offset + 26);
+    const extraLength = readU16LE(bytes, offset + 28);
+    const compressedSize = readU32LE(bytes, offset + 18);
+
+    const fileNameStart = offset + 30;
+    const fileNameEnd = fileNameStart + fileNameLength;
+    const dataStart = fileNameEnd + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (dataEnd > bytes.length) {
+      throw new Error("Invalid zip structure");
+    }
+
+    const fileName = textDecoder.decode(bytes.subarray(fileNameStart, fileNameEnd));
+    const content = textDecoder.decode(bytes.subarray(dataStart, dataEnd));
+    entries.set(fileName, content);
+
+    offset = dataEnd;
+  }
+
+  return entries;
+}
+
 const DEFAULT_STATE: RecorderState = {
   isRecording: false,
   isStopping: false,
@@ -185,6 +248,43 @@ describe("background integration", () => {
     expect(exportResponse.ok).toBe(true);
     expect(exportResponse.pageCount).toBeGreaterThanOrEqual(1);
     expect(downloadSpy).toHaveBeenCalledTimes(1);
+
+    const downloadArgs = downloadSpy.mock.calls[0]?.[0];
+    expect(downloadArgs).toMatchObject({
+      filename: expect.stringMatching(/^recordings\/.+\.zip$/),
+      saveAs: false,
+      conflictAction: "overwrite",
+    });
+    expect(typeof downloadArgs.url).toBe("string");
+
+    const zipBytes = decodeDataUrlBytes(downloadArgs.url);
+    const entries = parseStoredZipEntries(zipBytes);
+    expect(entries.has("metadata.json")).toBe(true);
+    const pageEntryName = [...entries.keys()].find(
+      (name) => name.startsWith("pages/") && name.endsWith(".txt"),
+    );
+    expect(pageEntryName).toBeDefined();
+    const pageEntry = entries.get(pageEntryName!);
+    expect(pageEntry).toContain("---");
+    expect(pageEntry).toContain("reason: test");
+    expect(pageEntry).toContain("content:");
+
+    const metadataRaw = entries.get("metadata.json");
+    expect(metadataRaw).toBeDefined();
+    const metadata = JSON.parse(metadataRaw!);
+    expect(metadata).toMatchObject({
+      pageCount: 1,
+      urlCount: 1,
+      summary: {
+        websitesOpened: 1,
+        urlsCaptured: 1,
+        snapshotCount: 1,
+      },
+      settings: expect.objectContaining({
+        preset: "full_capture",
+        savePageHtml: true,
+      }),
+    });
   });
 
   it("covers snapshot ignore branches and runtime message matrix", async () => {

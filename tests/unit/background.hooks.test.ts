@@ -193,6 +193,79 @@ describe("background test hooks", () => {
     expect(entries[2].content).toContain("url: https://jira.example.com/browse/ENG-42");
   });
 
+  it("writes multiple snapshot blocks for a single URL in chronological order", async () => {
+    const { module } = await loadBackgroundWithHooks();
+    const hooks = module.__testHooks;
+
+    const entries = hooks.buildUrlTextEntries([
+      {
+        id: "late",
+        createdAt: "2026-03-28T10:00:03.000Z",
+        tabId: 7,
+        windowId: 2,
+        url: "https://github.com/org/repo/actions/runs/1?pr=1",
+        urlPrefix: "github.com",
+        title: "Run details",
+        reason: "poll-diff",
+        timestamp: "2026-03-28T10:00:03.000Z",
+        textContent: "third",
+        signatureHash: 3,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+      {
+        id: "first",
+        createdAt: "2026-03-28T10:00:01.000Z",
+        tabId: 7,
+        windowId: 2,
+        url: "https://github.com/org/repo/actions/runs/1?pr=1",
+        urlPrefix: "github.com",
+        title: "Run details",
+        reason: "content-script-ready",
+        timestamp: "2026-03-28T10:00:01.000Z",
+        textContent: "first",
+        signatureHash: 1,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+      {
+        id: "second",
+        createdAt: "2026-03-28T10:00:02.000Z",
+        tabId: 7,
+        windowId: 2,
+        url: "https://github.com/org/repo/actions/runs/1?pr=1",
+        urlPrefix: "github.com",
+        title: "Run details",
+        reason: "poll-diff",
+        timestamp: "2026-03-28T10:00:02.000Z",
+        textContent: "second",
+        signatureHash: 2,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].filename).toBe(
+      "pages/github.com/https___github.com_org_repo_actions_runs_1_pr_1.txt",
+    );
+
+    const content = entries[0].content;
+    expect(content.match(/^---$/gm)).toHaveLength(3);
+    expect(content).toContain("reason: content-script-ready");
+    expect(content.match(/reason: poll-diff/g)).toHaveLength(2);
+
+    const firstIdx = content.indexOf("timestamp: 2026-03-28T10:00:01.000Z");
+    const secondIdx = content.indexOf("timestamp: 2026-03-28T10:00:02.000Z");
+    const thirdIdx = content.indexOf("timestamp: 2026-03-28T10:00:03.000Z");
+    expect(firstIdx).toBeGreaterThanOrEqual(0);
+    expect(secondIdx).toBeGreaterThan(firstIdx);
+    expect(thirdIdx).toBeGreaterThan(secondIdx);
+    expect(content).toContain("content:\nfirst");
+    expect(content).toContain("content:\nsecond");
+    expect(content).toContain("content:\nthird");
+  });
+
   it("builds session index summary with host/page durations", async () => {
     const { module } = await loadBackgroundWithHooks();
     const hooks = module.__testHooks;
@@ -320,16 +393,48 @@ describe("background test hooks", () => {
 
     expect(metadata).toMatchObject({
       sessionId: "session-xyz",
+      exportedAt: "2026-03-28T10:00:01.000Z",
       urlCount: 1,
       pageCount: 1,
       summary: {
         websitesOpened: 1,
         urlsCaptured: 1,
         snapshotCount: 1,
+        startedAt: "2026-03-28T10:00:00.000Z",
+        endedAt: "2026-03-28T10:00:00.000Z",
+        durationSeconds: 0,
       },
       indexText,
+      settings: {
+        preset: "pages_only",
+        hardLimitMb: 256,
+        autoExportOnSoftLimit: false,
+        pollIntervalMs: 100,
+        forceInitialScanOnStart: false,
+        savePageText: true,
+        savePageHtml: false,
+        saveRequestData: false,
+        savePageMeta: true,
+      },
     });
     expect(metadata.indexText).toContain("# Session Index");
     expect(metadata.websites).toHaveLength(1);
+    expect(metadata.websites[0]).toMatchObject({
+      urlPrefix: "github.com",
+      snapshotCount: 1,
+      uniqueUrlCount: 1,
+      startedAt: "2026-03-28T10:00:00.000Z",
+      endedAt: "2026-03-28T10:00:00.000Z",
+      durationSeconds: 0,
+      pages: [
+        {
+          url: "https://github.com/org/repo",
+          snapshotCount: 1,
+          startedAt: "2026-03-28T10:00:00.000Z",
+          endedAt: "2026-03-28T10:00:00.000Z",
+          durationSeconds: 0,
+        },
+      ],
+    });
   });
 });

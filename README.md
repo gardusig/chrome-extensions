@@ -93,8 +93,9 @@ npm run format:local
 - Popup has **Open all settings** for advanced filters and hard-limit options (`32/64/128/256/512/1024 MB`, default `32 MB`).
 - Export creates a zip in Downloads as `recordings/<sessionId>.zip`.
 - Zip contents include:
-  - `pages/<urlPrefix>/<fullUrl>.txt` (chronological structured text blocks, one file per full URL nested under prefix folders)
+  - `pages/<urlPrefix>/<safeUrlBasename>.txt` (chronological structured text blocks, one file per full URL nested under prefix folders)
   - `metadata.json` (session id, export timestamp, counts including `urlCount`, summary, per-website stats, embedded `indexText`, settings)
+- `src/lib/export.ts` contains an alternate export schema used by dedicated export tests; popup `Export Session` uses the `background.ts` zip contract above.
 - Repository includes `recordings/.gitkeep` to reserve a local recordings folder for future shared tooling.
 
 See [`docs/recording-format.md`](docs/recording-format.md) for schema details.

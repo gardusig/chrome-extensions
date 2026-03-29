@@ -49,14 +49,15 @@ Chrome downloads a zip file like:
 
 In Finder, open your Downloads folder, unzip it, and inspect:
 
-- `pages.jsonl`
 - `metadata.json`
+- `pages/<urlPrefix>/<safeUrlBasename>.txt`
 
 ## 6) What to expect in files
 
-- `pages.jsonl` is canonical for AI/tooling ingestion.
-- Each line includes snapshot fields like URL/title/timestamp/reason plus capture content.
-- If page HTML capture is enabled, rows include `htmlContent`.
+- `metadata.json` includes session id, export timestamp, counts, website/page summaries, index text, and effective settings.
+- `pages/<urlPrefix>/<safeUrlBasename>.txt` is one file per captured URL (nested by host prefix).
+- Each page file contains multiple `---` snapshot blocks with `timestamp`, `url`, `title`, `reason`, `tabId`, `windowId`, and `content:`.
+- If page HTML capture is enabled, blocks also include `htmlContent:`.
 - Sensitive query parameters in URLs are redacted by default as `[REDACTED]`.
 
 ## Troubleshooting

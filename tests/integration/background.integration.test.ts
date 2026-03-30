@@ -295,7 +295,10 @@ describe("background integration", () => {
     expect(pageEntry).toContain("url: https://app.slack.com/client/T1");
     expect(pageEntry).toContain("snapshotCount: 1");
     expect(pageEntry).toContain("content:");
-    expectHtmlProjection(pageEntry, "<html><body><div>Slack<div>Inner</div>Tail</div></body></html>");
+    expectHtmlProjection(
+      pageEntry,
+      "<html><body><div>Slack<div>Inner</div>Tail</div></body></html>",
+    );
     expect(pageEntry).not.toContain("reason:");
     expect(pageEntry).not.toContain("timestamp:");
     expect(pageEntry).not.toContain("tabId:");

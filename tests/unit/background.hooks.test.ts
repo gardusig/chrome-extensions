@@ -388,11 +388,7 @@ describe("background test hooks", () => {
       durationSeconds: 8,
     });
 
-    const index = hooks.buildSessionIndex(
-      summary,
-      "session-123",
-      "2026-03-28T10:00:10.000Z",
-    );
+    const index = hooks.buildSessionIndex(summary, "session-123", "2026-03-28T10:00:10.000Z");
     expect(index).toMatchObject({
       sessionId: "session-123",
       exportedAt: "2026-03-28T10:00:10.000Z",
@@ -426,11 +422,7 @@ describe("background test hooks", () => {
         contentSizeBytes: 1,
       },
     ]);
-    const index = hooks.buildSessionIndex(
-      summary,
-      "session-xyz",
-      "2026-03-28T10:00:01.000Z",
-    );
+    const index = hooks.buildSessionIndex(summary, "session-xyz", "2026-03-28T10:00:01.000Z");
     const metadata = hooks.buildExportMetadata({
       sessionId: "session-xyz",
       exportedAt: "2026-03-28T10:00:01.000Z",

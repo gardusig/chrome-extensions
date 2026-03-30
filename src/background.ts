@@ -997,7 +997,10 @@ async function handleExportSession(): Promise<{
         compaction,
         settings: recorderSettings,
       });
-      zipEntries.push({ filename: "metadata.json", content: JSON.stringify(exportMetadata, null, 2) });
+      zipEntries.push({
+        filename: "metadata.json",
+        content: JSON.stringify(exportMetadata, null, 2),
+      });
     }
     const zipBytes = createZip(zipEntries);
     await downloadZipFile(buildExportFilename(), zipBytes);

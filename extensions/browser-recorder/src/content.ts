@@ -20,7 +20,7 @@ type ContentUpdateSettingsMessage = {
   payload?: {
     pollIntervalMs?: number;
     savePageHtml?: boolean;
-    semanticCaptureLevel?: "off" | "minimal" | "full";
+    semanticCaptureLevel?: "off" | "minimal" | "medium" | "full";
   };
 };
 
@@ -49,6 +49,7 @@ if (!window.__recorderContentBootstrapped) {
   const MAX_SELECTOR_DEPTH = 3;
   const MAX_CHARS_PER_CHUNK = 8_000;
   const MAX_SEMANTIC_ELEMENTS_FULL = 80;
+  const MAX_SEMANTIC_ELEMENTS_MEDIUM = 50;
   const MAX_SEMANTIC_ELEMENTS_MINIMAL = 20;
   const MAX_DOM_SCAN_ELEMENTS = 400;
   const GENERIC_SEMANTIC_TEXT = new Set([
@@ -157,7 +158,7 @@ if (!window.__recorderContentBootstrapped) {
   function shouldIncludeSemanticValue(
     normalized: string,
     kind: string,
-    level: "off" | "minimal" | "full",
+    level: "off" | "minimal" | "medium" | "full",
   ): boolean {
     if (!normalized) {
       return false;
@@ -178,22 +179,32 @@ if (!window.__recorderContentBootstrapped) {
         return false;
       }
     }
+    if (level === "medium") {
+      const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+      if (wordCount < 2 && normalized.length < 12) {
+        return false;
+      }
+    }
     return true;
   }
 
-  function collectSemanticChunks(level: "off" | "minimal" | "full"): string[] {
+  function collectSemanticChunks(level: "off" | "minimal" | "medium" | "full"): string[] {
     if (level === "off") {
       return [];
     }
     const chunks: string[] = [];
     const selector =
-      level === "full"
+      level === "full" || level === "medium"
         ? "[aria-label], [alt], [title], input[placeholder], textarea[placeholder], button[title], a[title]"
         : "[aria-label], [alt], input[placeholder], textarea[placeholder]";
     const elements = Array.from(document.querySelectorAll<HTMLElement>(selector));
     const seenValues = new Set<string>();
     const semanticLimit =
-      level === "full" ? MAX_SEMANTIC_ELEMENTS_FULL : MAX_SEMANTIC_ELEMENTS_MINIMAL;
+      level === "full"
+        ? MAX_SEMANTIC_ELEMENTS_FULL
+        : level === "medium"
+          ? MAX_SEMANTIC_ELEMENTS_MEDIUM
+          : MAX_SEMANTIC_ELEMENTS_MINIMAL;
     for (const element of elements) {
       if (chunks.length >= semanticLimit || chunks.length >= MAX_CHUNKS) {
         break;
@@ -230,7 +241,9 @@ if (!window.__recorderContentBootstrapped) {
     return chunks;
   }
 
-  function collectSnapshotTextContent(semanticCaptureLevel: "off" | "minimal" | "full"): string {
+  function collectSnapshotTextContent(
+    semanticCaptureLevel: "off" | "minimal" | "medium" | "full",
+  ): string {
     const chunks: string[] = [];
     const pushChunk = (chunk: string | null): void => {
       if (!chunk || chunks.length >= MAX_CHUNKS) {
@@ -275,7 +288,7 @@ if (!window.__recorderContentBootstrapped) {
     let isSnapshotInFlight = false;
     let pollIntervalMs = 100;
     let includeHtmlInSnapshots = false;
-    let semanticCaptureLevel: "off" | "minimal" | "full" = "minimal";
+    let semanticCaptureLevel: "off" | "minimal" | "medium" | "full" = "minimal";
     let intervalId = -1;
 
     const captureSnapshot = (reason: string, textContent: string, includeHtml = false): void => {
@@ -350,6 +363,7 @@ if (!window.__recorderContentBootstrapped) {
         if (
           message.payload?.semanticCaptureLevel === "off" ||
           message.payload?.semanticCaptureLevel === "minimal" ||
+          message.payload?.semanticCaptureLevel === "medium" ||
           message.payload?.semanticCaptureLevel === "full"
         ) {
           semanticCaptureLevel = message.payload.semanticCaptureLevel;
@@ -387,7 +401,7 @@ if (!window.__recorderContentBootstrapped) {
           settings?: {
             pollIntervalMs?: number;
             savePageHtml?: boolean;
-            semanticCaptureLevel?: "off" | "minimal" | "full";
+            semanticCaptureLevel?: "off" | "minimal" | "medium" | "full";
           };
         }) => {
           const nextInterval = response.settings?.pollIntervalMs;
@@ -404,6 +418,7 @@ if (!window.__recorderContentBootstrapped) {
             response.ok &&
             (response.settings?.semanticCaptureLevel === "off" ||
               response.settings?.semanticCaptureLevel === "minimal" ||
+              response.settings?.semanticCaptureLevel === "medium" ||
               response.settings?.semanticCaptureLevel === "full")
           ) {
             semanticCaptureLevel = response.settings.semanticCaptureLevel;

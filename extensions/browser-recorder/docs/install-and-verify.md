@@ -17,7 +17,7 @@ npm run build
 2. Go to `chrome://extensions`.
 3. Enable **Developer mode** (top-right).
 4. Click **Load unpacked**.
-5. Select the project's `dist/` folder.
+5. Select the project's **`extensions/browser-recorder/dist/`** folder (build output from the repository root).
 
 You should see **Recorder** in the extensions list.
 

@@ -81,7 +81,8 @@ export type PipelineStats = {
     rawCount: number;
     enrichedCount: number;
     totalBytes: number;
-    estimatedCompressedBytes: number;
+    /** Midpoint between total raw bytes and the compressed heuristic (see `effectiveSizeBytes`). */
+    estimatedSizeBytes: number;
   };
   urlRows: Array<{
     url: string;
@@ -92,7 +93,7 @@ export type PipelineStats = {
 };
 
 export type CapturePreset = "pages_only" | "pages_requests" | "full_capture";
-export type SemanticCaptureLevel = "off" | "minimal" | "full";
+export type SemanticCaptureLevel = "off" | "minimal" | "medium" | "full";
 
 export type RecorderSettings = {
   preset: CapturePreset;

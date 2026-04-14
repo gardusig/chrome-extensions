@@ -7,6 +7,7 @@
 
 # testing
 /coverage
+/extensions/browser-recorder/coverage
 
 # next.js
 /.next/
@@ -15,12 +16,12 @@
 # production
 /build
 /dist
-/recordings/*
-!/recordings/.gitkeep
-# Explicit recording export artifact extensions
-/recordings/**/*.json
-/recordings/**/*.jsonl
-/recordings/**/*.txt
+/extensions/browser-recorder/dist
+/extensions/browser-recorder/recordings/*
+!/extensions/browser-recorder/recordings/.gitkeep
+/extensions/browser-recorder/recordings/**/*.json
+/extensions/browser-recorder/recordings/**/*.jsonl
+/extensions/browser-recorder/recordings/**/*.txt
 
 # misc
 .DS_Store

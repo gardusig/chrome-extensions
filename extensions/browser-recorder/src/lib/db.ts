@@ -56,7 +56,7 @@ export type PipelineStats = {
     rawCount: number;
     enrichedCount: number;
     totalBytes: number;
-    estimatedCompressedBytes: number;
+    estimatedSizeBytes: number;
   };
   urlRows: Array<{
     url: string;
@@ -389,7 +389,7 @@ export async function clearAllCaptureData(): Promise<void> {
 }
 
 export async function readPipelineStats(
-  estimateCompressedBytes: (rawBytes: number) => number,
+  estimateSizeBytes: (rawBytes: number) => number,
 ): Promise<PipelineStats> {
   let rawRows: RawPageRecord[];
   let queueRows: QueueRecord[];
@@ -436,7 +436,7 @@ export async function readPipelineStats(
       rawCount: rawRows.length,
       enrichedCount: enrichedRows.length,
       totalBytes,
-      estimatedCompressedBytes: estimateCompressedBytes(totalBytes),
+      estimatedSizeBytes: estimateSizeBytes(totalBytes),
     },
     urlRows: [...byUrl.entries()]
       .map(([url, values]) => ({

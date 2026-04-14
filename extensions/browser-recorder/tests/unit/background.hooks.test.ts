@@ -315,9 +315,57 @@ describe("background test hooks", () => {
       semanticChunksRaw: 2,
       semanticChunksOmitted: 1,
       snapshotsCompacted: 1,
+      bodyBlocksRaw: 2,
+      bodyBlocksOmitted: 0,
+      snapshotsBodyCompacted: 0,
     });
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].content).toContain("<unchanged-from-previous-snapshot>");
+  });
+
+  it("omits repeated body chunks when semantic content also changes", async () => {
+    const { module } = await loadBackgroundWithHooks();
+    const hooks = module.__testHooks;
+
+    const result = hooks.buildUrlTextEntriesWithCompaction([
+      {
+        id: "a",
+        createdAt: "2026-03-28T10:00:01.000Z",
+        tabId: 4,
+        windowId: 1,
+        url: "https://example.com/page",
+        urlPrefix: "example.com",
+        title: "Example",
+        reason: "poll-diff",
+        timestamp: "2026-03-28T10:00:01.000Z",
+        textContent:
+          "[source=body selector=body]\nSame body\n\n[source=semantic selector=a kind=aria-label]\nOne",
+        signatureHash: 1,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+      {
+        id: "b",
+        createdAt: "2026-03-28T10:00:02.000Z",
+        tabId: 4,
+        windowId: 1,
+        url: "https://example.com/page",
+        urlPrefix: "example.com",
+        title: "Example",
+        reason: "poll-diff",
+        timestamp: "2026-03-28T10:00:02.000Z",
+        textContent:
+          "[source=body selector=body]\nSame body\n\n[source=semantic selector=a kind=aria-label]\nTwo",
+        signatureHash: 2,
+        sectionCount: 1,
+        contentSizeBytes: 10,
+      },
+    ]);
+
+    expect(result.compaction.bodyBlocksRaw).toBe(2);
+    expect(result.compaction.bodyBlocksOmitted).toBe(1);
+    expect(result.compaction.snapshotsBodyCompacted).toBe(1);
+    expect(result.entries[0].content).toContain("[source=body selector=__compacted__");
   });
 
   it("builds structured session index with host/page durations", async () => {
@@ -433,7 +481,22 @@ describe("background test hooks", () => {
         semanticChunksRaw: 1,
         semanticChunksOmitted: 0,
         snapshotsCompacted: 0,
+        bodyBlocksRaw: 0,
+        bodyBlocksOmitted: 0,
+        snapshotsBodyCompacted: 0,
       },
+      exportMetrics: hooks.computeExportMetrics(
+        {
+          semanticChunksRaw: 1,
+          semanticChunksOmitted: 0,
+          snapshotsCompacted: 0,
+          bodyBlocksRaw: 0,
+          bodyBlocksOmitted: 0,
+          snapshotsBodyCompacted: 0,
+        },
+        100,
+        40,
+      ),
       settings: {
         preset: "pages_only",
         hardLimitMb: 256,
@@ -476,6 +539,15 @@ describe("background test hooks", () => {
         semanticChunksRaw: 1,
         semanticChunksOmitted: 0,
         snapshotsCompacted: 0,
+        bodyBlocksRaw: 0,
+        bodyBlocksOmitted: 0,
+        snapshotsBodyCompacted: 0,
+      },
+      exportMetrics: {
+        payloadSizeBytes: 70,
+        semanticCompactionYield: 0,
+        bodyCompactionYield: null,
+        captureEfficiencyScore: 0,
       },
       settings: {
         preset: "pages_only",

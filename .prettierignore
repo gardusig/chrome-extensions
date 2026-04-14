@@ -1,3 +1,6 @@
 dist
 node_modules
 recordings
+extensions/browser-recorder/dist
+extensions/browser-recorder/recordings
+extensions/browser-recorder/coverage

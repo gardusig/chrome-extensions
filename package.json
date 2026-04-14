@@ -1,10 +1,10 @@
 {
-  "name": "browser-recorder",
+  "name": "chrome-extensions",
   "version": "1.0.0",
-  "description": "Chrome extension MVP to record API and page text interactions.",
+  "description": "Workspace for Chrome extensions (MV3).",
   "private": true,
   "scripts": {
-    "build": "vite build && cp manifest.json dist/manifest.json",
+    "build": "vite build && cp extensions/browser-recorder/manifest.json extensions/browser-recorder/dist/manifest.json",
     "setup:browser": "npm run build && node scripts/setup-browser.mjs",
     "dev": "vite build --watch",
     "test": "vitest run",
@@ -19,7 +19,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gustavo-gardusi/browser-recorder.git"
+    "url": "git+https://github.com/gardusig/chrome-extensions.git"
   },
   "keywords": [
     "chrome-extension",
@@ -30,9 +30,9 @@
   "license": "MIT",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/gustavo-gardusi/browser-recorder/issues"
+    "url": "https://github.com/gardusig/chrome-extensions/issues"
   },
-  "homepage": "https://github.com/gustavo-gardusi/browser-recorder#readme",
+  "homepage": "https://github.com/gardusig/chrome-extensions#readme",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.1.38",

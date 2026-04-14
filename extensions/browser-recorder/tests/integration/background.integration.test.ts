@@ -315,6 +315,12 @@ describe("background integration", () => {
         urlsCaptured: 1,
         snapshotCount: 1,
       },
+      exportMetrics: expect.objectContaining({
+        payloadSizeBytes: expect.any(Number),
+        semanticCompactionYield: null,
+        bodyCompactionYield: null,
+        captureEfficiencyScore: null,
+      }),
       settings: expect.objectContaining({
         preset: "full_capture",
         savePageHtml: true,
@@ -393,6 +399,15 @@ describe("background integration", () => {
       semanticChunksRaw: 2,
       semanticChunksOmitted: 1,
       snapshotsCompacted: 1,
+      bodyBlocksRaw: 2,
+      bodyBlocksOmitted: 0,
+      snapshotsBodyCompacted: 0,
+    });
+    expect(metadata.exportMetrics).toMatchObject({
+      payloadSizeBytes: expect.any(Number),
+      semanticCompactionYield: expect.any(Number),
+      bodyCompactionYield: expect.any(Number),
+      captureEfficiencyScore: expect.any(Number),
     });
   });
 

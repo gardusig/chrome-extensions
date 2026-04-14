@@ -121,7 +121,7 @@ function renderPipelineStats(stats: PipelineStats): void {
   queueFailedEl!.textContent = String(stats.queue.failed);
   queueProcessedEl!.textContent = String(stats.queue.processed);
   totalBytesEl!.textContent = bytesToHuman(stats.totals.totalBytes);
-  compressedBytesEl!.textContent = bytesToHuman(stats.totals.estimatedCompressedBytes);
+  compressedBytesEl!.textContent = bytesToHuman(stats.totals.estimatedSizeBytes);
   const updatedAt = new Date(stats.generatedAt);
   queueUpdatedAtEl!.textContent = Number.isNaN(updatedAt.getTime())
     ? "Updated: --"

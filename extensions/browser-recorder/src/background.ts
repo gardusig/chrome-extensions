@@ -15,7 +15,7 @@ import {
   type QueueRecord,
   type RawPageRecord,
 } from "./lib/db";
-import { estimateCompressedBytes } from "./lib/metrics";
+import { effectiveSizeBytes } from "./lib/metrics";
 import { parseSections } from "./lib/section-parsers/registry";
 import { transformHtmlToIndentedText } from "./lib/html-textify";
 import { createZip } from "./lib/zip";
@@ -108,6 +108,7 @@ function normalizeSettings(settings: RecorderSettings | undefined): RecorderSett
   const normalizedSemanticCaptureLevel: SemanticCaptureLevel =
     semanticCaptureLevel === "off" ||
     semanticCaptureLevel === "minimal" ||
+    semanticCaptureLevel === "medium" ||
     semanticCaptureLevel === "full"
       ? semanticCaptureLevel
       : DEFAULT_SETTINGS.semanticCaptureLevel;
@@ -194,7 +195,7 @@ async function updateState(nextState: RecorderState): Promise<void> {
 }
 
 async function refreshStorageUsage(): Promise<void> {
-  const stats = await readPipelineStats(estimateCompressedBytes);
+  const stats = await readPipelineStats(effectiveSizeBytes);
   if (stats.totals.totalBytes !== recorderState.storageBytesInUse) {
     await updateState({
       ...recorderState,
@@ -492,7 +493,12 @@ type ExportMetadata = {
     semanticChunksRaw: number;
     semanticChunksOmitted: number;
     snapshotsCompacted: number;
+    bodyBlocksRaw: number;
+    bodyBlocksOmitted: number;
+    snapshotsBodyCompacted: number;
   };
+  /** Single balanced KPI plus component yields; only present when export metadata is enabled. */
+  exportMetrics: ExportMetrics;
   settings: RecorderSettings;
 };
 
@@ -500,6 +506,20 @@ type ExportCompactionStats = {
   semanticChunksRaw: number;
   semanticChunksOmitted: number;
   snapshotsCompacted: number;
+  bodyBlocksRaw: number;
+  bodyBlocksOmitted: number;
+  snapshotsBodyCompacted: number;
+};
+
+type ExportMetrics = {
+  /** Midpoint between UTF-8 size of page text entries and the zip payload size (excludes metadata.json). */
+  payloadSizeBytes: number;
+  /** `semanticChunksOmitted / semanticChunksRaw` when raw > 0. */
+  semanticCompactionYield: number | null;
+  /** `bodyBlocksOmitted / bodyBlocksRaw` when raw > 0. */
+  bodyCompactionYield: number | null;
+  /** Mean of available yields (0–1); middle-ground score for redundancy removed vs captured. */
+  captureEfficiencyScore: number | null;
 };
 
 function toTimestampMs(value: string): number | null {
@@ -599,6 +619,38 @@ function buildSessionSummary(pages: EnrichedPageRecord[]): SessionSummary {
   };
 }
 
+function computeExportMetrics(
+  compaction: ExportCompactionStats,
+  uncompressedTextBytes: number,
+  zipPayloadBytes: number,
+): ExportMetrics {
+  const payloadSizeBytes =
+    uncompressedTextBytes > 0 || zipPayloadBytes > 0
+      ? Math.round((uncompressedTextBytes + zipPayloadBytes) / 2)
+      : 0;
+  const semanticCompactionYield =
+    compaction.semanticChunksRaw > 0
+      ? compaction.semanticChunksOmitted / compaction.semanticChunksRaw
+      : null;
+  const bodyCompactionYield =
+    compaction.bodyBlocksRaw > 0 ? compaction.bodyBlocksOmitted / compaction.bodyBlocksRaw : null;
+  const yields: number[] = [];
+  if (semanticCompactionYield !== null) {
+    yields.push(semanticCompactionYield);
+  }
+  if (bodyCompactionYield !== null) {
+    yields.push(bodyCompactionYield);
+  }
+  const captureEfficiencyScore =
+    yields.length > 0 ? yields.reduce((a, b) => a + b, 0) / yields.length : null;
+  return {
+    payloadSizeBytes,
+    semanticCompactionYield,
+    bodyCompactionYield,
+    captureEfficiencyScore,
+  };
+}
+
 function buildSessionIndex(
   summary: SessionSummary,
   sessionId: string,
@@ -624,9 +676,11 @@ function buildExportMetadata(params: {
   summary: SessionSummary;
   index: ExportMetadata["index"];
   compaction: ExportCompactionStats;
+  exportMetrics: ExportMetrics;
   settings: RecorderSettings;
 }): ExportMetadata {
-  const { sessionId, exportedAt, pageCount, summary, index, compaction, settings } = params;
+  const { sessionId, exportedAt, pageCount, summary, index, compaction, exportMetrics, settings } =
+    params;
   return {
     sessionId,
     exportedAt,
@@ -643,6 +697,7 @@ function buildExportMetadata(params: {
     websites: summary.websites,
     index,
     compaction,
+    exportMetrics,
     settings,
   };
 }
@@ -670,34 +725,71 @@ function splitSnapshotTextChunks(textContent: string): {
   };
 }
 
+function extractBodyChunk(nonSemanticChunks: string[]): {
+  bodyChunk: string | null;
+  otherChunks: string[];
+} {
+  const idx = nonSemanticChunks.findIndex((chunk) => chunk.startsWith("[source=body "));
+  if (idx === -1) {
+    return { bodyChunk: null, otherChunks: nonSemanticChunks };
+  }
+  const bodyChunk = nonSemanticChunks[idx] ?? null;
+  const otherChunks = [...nonSemanticChunks.slice(0, idx), ...nonSemanticChunks.slice(idx + 1)];
+  return { bodyChunk, otherChunks };
+}
+
 function compactSnapshotText(
   textContent: string,
   previousSemanticSignature: string | null,
-): { textContent: string; semanticSignature: string | null; omittedSemanticChunks: number } {
+  previousBodySignature: string | null,
+): {
+  textContent: string;
+  semanticSignature: string | null;
+  bodySignature: string | null;
+  omittedSemanticChunks: number;
+  omittedBodyBlocks: number;
+} {
   const { semanticChunks, nonSemanticChunks } = splitSnapshotTextChunks(textContent);
-  if (semanticChunks.length === 0) {
-    return {
-      textContent,
-      semanticSignature: null,
-      omittedSemanticChunks: 0,
-    };
+  const { bodyChunk, otherChunks } = extractBodyChunk(nonSemanticChunks);
+  const semanticJoined = semanticChunks.join("\n\n");
+  const semanticSignatureOrNull = semanticChunks.length > 0 ? semanticJoined : null;
+
+  const semSame =
+    previousSemanticSignature !== null &&
+    semanticChunks.length > 0 &&
+    semanticJoined === previousSemanticSignature;
+  const bodySame =
+    previousBodySignature !== null && bodyChunk !== null && bodyChunk === previousBodySignature;
+
+  const semanticPart = semSame
+    ? `[source=semantic selector=__compacted__ kind=info]\n<unchanged-from-previous-snapshot>`
+    : semanticChunks.length > 0
+      ? semanticChunks.join("\n\n")
+      : "";
+
+  const bodyPart =
+    bodySame && bodyChunk
+      ? `[source=body selector=__compacted__ kind=info]\n<unchanged-from-previous-snapshot>`
+      : (bodyChunk ?? "");
+
+  const parts: string[] = [];
+  if (bodyPart) {
+    parts.push(bodyPart);
   }
-  const semanticSignature = semanticChunks.join("\n\n");
-  if (previousSemanticSignature === semanticSignature) {
-    const base = nonSemanticChunks.join("\n\n").trim();
-    return {
-      textContent:
-        base.length > 0
-          ? `${base}\n\n[source=semantic selector=__compacted__ kind=info]\n<unchanged-from-previous-snapshot>`
-          : "[source=semantic selector=__compacted__ kind=info]\n<unchanged-from-previous-snapshot>",
-      semanticSignature,
-      omittedSemanticChunks: semanticChunks.length,
-    };
+  if (otherChunks.length > 0) {
+    parts.push(otherChunks.join("\n\n"));
   }
+  if (semanticPart) {
+    parts.push(semanticPart);
+  }
+
+  const textOut = parts.join("\n\n").trim();
   return {
-    textContent,
-    semanticSignature,
-    omittedSemanticChunks: 0,
+    textContent: textOut.length > 0 ? textOut : "<empty>",
+    semanticSignature: semanticSignatureOrNull,
+    bodySignature: bodyChunk,
+    omittedSemanticChunks: semSame ? semanticChunks.length : 0,
+    omittedBodyBlocks: bodySame && bodyChunk ? 1 : 0,
   };
 }
 
@@ -715,6 +807,9 @@ function buildPrefixPageTextBlocks(params: { pages: EnrichedPageRecord[] }): {
         semanticChunksRaw: 0,
         semanticChunksOmitted: 0,
         snapshotsCompacted: 0,
+        bodyBlocksRaw: 0,
+        bodyBlocksOmitted: 0,
+        snapshotsBodyCompacted: 0,
       },
     };
   }
@@ -749,10 +844,14 @@ function buildPrefixPageTextBlocks(params: { pages: EnrichedPageRecord[] }): {
   ];
 
   let previousSemanticSignature: string | null = null;
+  let previousBodySignature: string | null = null;
   const stats: ExportCompactionStats = {
     semanticChunksRaw: 0,
     semanticChunksOmitted: 0,
     snapshotsCompacted: 0,
+    bodyBlocksRaw: 0,
+    bodyBlocksOmitted: 0,
+    snapshotsBodyCompacted: 0,
   };
   const bodyContent = sortedPages
     .map((page) => {
@@ -762,15 +861,29 @@ function buildPrefixPageTextBlocks(params: { pages: EnrichedPageRecord[] }): {
       if (rawContent.length > 0) {
         const split = splitSnapshotTextChunks(rawContent);
         stats.semanticChunksRaw += split.semanticChunks.length;
-        const compacted = compactSnapshotText(rawContent, previousSemanticSignature);
+        const { bodyChunk: rawBody } = extractBodyChunk(split.nonSemanticChunks);
+        if (rawBody) {
+          stats.bodyBlocksRaw += 1;
+        }
+        const compacted = compactSnapshotText(
+          rawContent,
+          previousSemanticSignature,
+          previousBodySignature,
+        );
         pageContent = compacted.textContent;
         if (compacted.omittedSemanticChunks > 0) {
           stats.semanticChunksOmitted += compacted.omittedSemanticChunks;
           stats.snapshotsCompacted += 1;
         }
+        if (compacted.omittedBodyBlocks > 0) {
+          stats.bodyBlocksOmitted += compacted.omittedBodyBlocks;
+          stats.snapshotsBodyCompacted += 1;
+        }
         previousSemanticSignature = compacted.semanticSignature;
+        previousBodySignature = compacted.bodySignature;
       } else {
         previousSemanticSignature = null;
+        previousBodySignature = null;
       }
 
       lines.push(pageContent.length > 0 ? pageContent : "<empty>");
@@ -836,6 +949,9 @@ function buildUrlTextEntriesWithCompaction(pages: EnrichedPageRecord[]): {
     semanticChunksRaw: 0,
     semanticChunksOmitted: 0,
     snapshotsCompacted: 0,
+    bodyBlocksRaw: 0,
+    bodyBlocksOmitted: 0,
+    snapshotsBodyCompacted: 0,
   };
   const sortedPrefixes = [...byPrefix.entries()].sort(([a], [b]) => a.localeCompare(b));
   for (const [prefix, byUrl] of sortedPrefixes) {
@@ -848,6 +964,9 @@ function buildUrlTextEntriesWithCompaction(pages: EnrichedPageRecord[]): {
       compaction.semanticChunksRaw += pageText.stats.semanticChunksRaw;
       compaction.semanticChunksOmitted += pageText.stats.semanticChunksOmitted;
       compaction.snapshotsCompacted += pageText.stats.snapshotsCompacted;
+      compaction.bodyBlocksRaw += pageText.stats.bodyBlocksRaw;
+      compaction.bodyBlocksOmitted += pageText.stats.bodyBlocksOmitted;
+      compaction.snapshotsBodyCompacted += pageText.stats.snapshotsBodyCompacted;
       entries.push({
         filename: `pages/${safePrefix}/${safeNames.get(url)}.txt`,
         content: pageText.content,
@@ -929,7 +1048,7 @@ async function handleClearSessionData(): Promise<{ cleared: boolean }> {
 }
 
 async function handleGetPipelineStats(): Promise<PipelineStats> {
-  return readPipelineStats(estimateCompressedBytes);
+  return readPipelineStats(effectiveSizeBytes);
 }
 
 async function handleGetSessionStats(): Promise<SessionStats> {
@@ -986,6 +1105,17 @@ async function handleExportSession(): Promise<{
     const summary = buildSessionSummary(pages);
     const zipEntries = [...urlEntries];
     if (recorderSettings.saveExportMetadata) {
+      const textEncoder = new TextEncoder();
+      const uncompressedTextBytes = urlEntries.reduce(
+        (sum, entry) => sum + textEncoder.encode(entry.content).length,
+        0,
+      );
+      const zipPayloadBytes = createZip(urlEntries).byteLength;
+      const exportMetrics = computeExportMetrics(
+        compaction,
+        uncompressedTextBytes,
+        zipPayloadBytes,
+      );
       const exportedAt = new Date().toISOString();
       const index = buildSessionIndex(summary, sessionId, exportedAt);
       const exportMetadata = buildExportMetadata({
@@ -995,6 +1125,7 @@ async function handleExportSession(): Promise<{
         summary,
         index,
         compaction,
+        exportMetrics,
         settings: recorderSettings,
       });
       zipEntries.push({
@@ -1160,6 +1291,7 @@ export const __testHooks = {
   buildSessionSummary,
   buildSessionIndex,
   buildExportMetadata,
+  computeExportMetrics,
   buildPrefixPageTextBlocks,
   buildUrlTextEntries,
   buildUrlTextEntriesWithCompaction,

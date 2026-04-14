@@ -9,6 +9,12 @@ export function estimateCompressedBytes(totalBytes: number): number {
   return Math.max(0, estimated);
 }
 
+/** Midpoint between raw byte count and the heuristic compressed estimate (neither pessimistic raw nor optimistic compression-only). */
+export function effectiveSizeBytes(totalBytes: number): number {
+  const raw = Math.max(0, totalBytes);
+  return Math.round((raw + estimateCompressedBytes(raw)) / 2);
+}
+
 export function ratioFromSizes(originalBytes: number, compressedBytes: number): number {
   if (originalBytes <= 0 || compressedBytes < 0) {
     return DEFAULT_COMPRESSION_RATIO;

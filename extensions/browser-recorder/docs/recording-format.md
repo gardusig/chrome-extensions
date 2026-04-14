@@ -15,6 +15,11 @@ When adjacent snapshots repeat the same semantic chunk set, export compacts the 
 - `[source=semantic selector=__compacted__ kind=info]`
 - `<unchanged-from-previous-snapshot>`
 
+When the **body** chunk (`[source=body …]`) matches the previous snapshot on the same URL, export compacts it similarly:
+
+- `[source=body selector=__compacted__ kind=info]`
+- `<unchanged-from-previous-snapshot>`
+
 ## Page Text Entry Format
 
 Each page file starts with a `# Page Index` header containing:
@@ -48,8 +53,19 @@ This file is emitted only when export metadata is enabled.
 - `summary` (counts + start/end/duration)
 - `websites` (per-prefix aggregate stats with nested per-URL aggregates)
 - `index` (structured mirror of high-level session/website/page index data)
-- `compaction` (`semanticChunksRaw`, `semanticChunksOmitted`, `snapshotsCompacted`)
+- `compaction` (`semanticChunksRaw`, `semanticChunksOmitted`, `snapshotsCompacted`, `bodyBlocksRaw`, `bodyBlocksOmitted`, `snapshotsBodyCompacted`)
+- `exportMetrics` (payload size and a single balanced **capture efficiency** KPI):
+  - `payloadSizeBytes` — midpoint between UTF-8 size of all `pages/**` text entries and the zip payload size (excludes `metadata.json`); one number instead of separate raw/zip/ratio
+  - `semanticCompactionYield` — `semanticChunksOmitted / semanticChunksRaw` when raw > 0
+  - `bodyCompactionYield` — `bodyBlocksOmitted / bodyBlocksRaw` when raw > 0
+  - `captureEfficiencyScore` — mean of the available yields (0–1); use it to compare runs at a glance
 - `settings` (effective recorder settings at export time)
+
+### Tuning for large, repetitive sites (e.g. GitHub)
+
+- **Poll interval** (`pollIntervalMs`, default 100 ms): increase (e.g. 300–500 ms) when you are mostly reading static pages so fewer near-duplicate snapshots are stored and exported.
+- **Semantic capture**: `medium` uses the same attribute surface as `full` (including `title`) with stricter short-string filtering and a cap between minimal and full; good default when `minimal` drops too much context and `full` is noisy.
+- **Compare exports** with **Include metadata.json in zip export** enabled: use `exportMetrics.captureEfficiencyScore` and the compaction counters to see whether redundancy removal is helping without opening each `.txt`.
 
 ## MVP Constraints
 

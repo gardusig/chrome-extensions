@@ -2,19 +2,23 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const rootDir = fileURLToPath(new URL(".", import.meta.url));
+const extensionRoot = resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "extensions/browser-recorder",
+);
 
 export default defineConfig({
+  root: extensionRoot,
   build: {
     target: "es2022",
     outDir: "dist",
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        popup: resolve(rootDir, "popup.html"),
-        options: resolve(rootDir, "options.html"),
-        background: resolve(rootDir, "src/background.ts"),
-        content: resolve(rootDir, "src/content.ts"),
+        popup: resolve(extensionRoot, "popup.html"),
+        options: resolve(extensionRoot, "options.html"),
+        background: resolve(extensionRoot, "src/background.ts"),
+        content: resolve(extensionRoot, "src/content.ts"),
       },
       output: {
         entryFileNames: "[name].js",

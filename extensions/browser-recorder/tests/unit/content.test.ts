@@ -319,4 +319,39 @@ describe("content script", () => {
     expect(offText).toContain("[source=body selector=body]");
     expect(offText).not.toContain("[source=semantic");
   });
+
+  it("medium level captures title attributes with minimal-style filtering", async () => {
+    const chromeMock = createChromeMock() as ChromeMockWithInternals;
+    const sentMessages: Array<{ type?: string; payload?: { textContent?: string } }> = [];
+    vi.spyOn(chromeMock.runtime, "sendMessage").mockImplementation(async (message: unknown) => {
+      const typed = message as { type?: string; payload?: { textContent?: string } };
+      if (typed.type === "GET_SETTINGS") {
+        return {
+          ok: true,
+          settings: { pollIntervalMs: 100, savePageHtml: false, semanticCaptureLevel: "medium" },
+        };
+      }
+      sentMessages.push(typed);
+      return { ok: true };
+    });
+    globalThis.chrome = chromeMock;
+
+    document.body.innerHTML = `
+      <a title="Documentation section overview">Docs</a>
+    `;
+    Object.defineProperty(document.body, "innerText", {
+      configurable: true,
+      get: () => "Docs",
+    });
+
+    window.__recorderContentBootstrapped = undefined;
+    vi.resetModules();
+    await import("../../src/content.ts");
+    vi.advanceTimersByTime(120);
+
+    const snapshot = sentMessages.find((item) => item.type === "CONTENT_PAGE_SNAPSHOT");
+    const text = snapshot?.payload?.textContent ?? "";
+    expect(text).toContain("[source=semantic");
+    expect(text).toContain("Documentation section overview");
+  });
 });

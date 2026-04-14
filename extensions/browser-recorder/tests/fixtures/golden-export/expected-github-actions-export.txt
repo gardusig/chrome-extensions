@@ -1,0 +1,27 @@
+# Page Index
+url: https://github.com/example/repo/actions
+startedAt: 2026-04-03T10:00:01.000Z
+endedAt: 2026-04-03T10:00:02.000Z
+durationSeconds: 1
+snapshotCount: 2
+titles: Actions
+reasons: poll-diff
+tabIds: 1
+windowIds: 1
+---
+content:
+[source=body selector=body]
+GitHub Actions
+Repository example/repo
+Workflow Run #42 success
+
+[source=semantic selector=a kind=aria-label]
+Insights
+
+---
+content:
+[source=body selector=__compacted__ kind=info]
+<unchanged-from-previous-snapshot>
+
+[source=semantic selector=__compacted__ kind=info]
+<unchanged-from-previous-snapshot>

@@ -16,6 +16,7 @@ function mountOptionsDom(): void {
     <select id="semantic-capture-level">
       <option value="off">off</option>
       <option value="minimal">minimal</option>
+      <option value="medium">medium</option>
       <option value="full">full</option>
     </select>
     <input id="save-page-html" type="checkbox" />
@@ -69,7 +70,7 @@ describe("options", () => {
         rawCount: 3,
         enrichedCount: 12,
         totalBytes: 1024 * 1024,
-        estimatedCompressedBytes: 512 * 1024,
+        estimatedSizeBytes: 512 * 1024,
       },
       urlRows: [{ url: "https://app.slack.com/client/T123/C456", pageCount: 8, bytes: 900_000 }],
       generatedAt: "2026-03-28T22:00:00.000Z",
@@ -131,7 +132,7 @@ describe("options", () => {
         rawCount: 0,
         enrichedCount: 0,
         totalBytes: 512,
-        estimatedCompressedBytes: 0,
+        estimatedSizeBytes: 0,
       },
       urlRows: [],
       generatedAt: "invalid-date",

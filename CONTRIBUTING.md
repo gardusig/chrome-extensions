@@ -22,7 +22,9 @@ npm run build
 npm run setup:browser   # optional: prints Load unpacked steps
 ```
 
-- **browser-recorder**: load **`extensions/browser-recorder/dist/`** in `chrome://extensions` (Developer mode → Load unpacked).
+- **Recorder**: load **`extensions/recorder/dist/`** in `chrome://extensions` (Developer mode → Load unpacked).
+
+See **[docs/local-development.md](docs/local-development.md)** for layout, troubleshooting, and adding another extension.
 
 ## Quality checks
 
@@ -42,10 +44,10 @@ npm run check
 
 ## Adding a new extension
 
-1. Create a sibling folder under `extensions/<your-extension-name>/` (same level as `browser-recorder`).
+1. Create a sibling folder under `extensions/<your-extension-name>/` (same level as `recorder`).
 2. Add its own `manifest.json`, entry HTML/TS, and `README.md`.
 3. Extend the root [Vite config](vite.config.ts) (or introduce a separate build entry) so `npm run build` produces a loadable `dist/` for that extension.
-4. Document it in the root [README.md](README.md) table.
+4. Document it in the root [README.md](README.md) table and, if you add product docs, a short entry in [docs/README.md](docs/README.md).
 
 ## Pull requests
 

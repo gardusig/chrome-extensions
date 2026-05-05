@@ -1,15 +1,13 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 
-const DIST_MANIFEST_PATH = "extensions/browser-recorder/dist/manifest.json";
+const DIST_MANIFEST_PATH = "extensions/recorder/dist/manifest.json";
 
 async function main() {
   try {
     await access(DIST_MANIFEST_PATH, constants.R_OK);
   } catch {
-    console.error(
-      "Build output missing: extensions/browser-recorder/dist/manifest.json not found.",
-    );
+    console.error("Build output missing: extensions/recorder/dist/manifest.json not found.");
     console.error("Run `npm run build` before loading in Chrome.");
     process.exit(1);
   }
@@ -19,8 +17,10 @@ async function main() {
   console.log("1) Open chrome://extensions");
   console.log("2) Enable Developer mode (top-right)");
   console.log("3) Click Load unpacked");
-  console.log("4) Select this project's extensions/browser-recorder/dist/ folder");
+  console.log("4) Select this project's extensions/recorder/dist/ folder");
   console.log("5) If already loaded, click Reload on Recorder");
+  console.log("");
+  console.log("See docs/local-development.md for full guidance.");
   console.log("");
 }
 

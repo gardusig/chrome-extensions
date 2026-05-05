@@ -37,8 +37,8 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Runs tests/unit/** and tests/integration/** (Vitest single run).
-      - name: Run tests (unit + integration) with coverage
+      # Vitest: extensions/recorder/tests/**/*.test.ts (see vite.config.ts).
+      - name: Run tests with coverage
         run: npm run test:coverage
 
       - name: Build

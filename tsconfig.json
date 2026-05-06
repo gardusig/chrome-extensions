@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["chrome", "node"]
   },
-  "include": ["extensions/browser-recorder/src/**/*.ts", "vite.config.ts"]
+  "include": ["extensions/recorder/src/**/*.ts", "vite.config.ts"]
 }

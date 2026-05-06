@@ -4,11 +4,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as digestQueue from "../../src/lib/digest-queue";
 import {
-  appendSnapshotAndLedger,
   clearAllStores,
   clearPolledUniqueStore,
   estimateBytesStores23,
   memoryStoresSnapshot,
+  mergeTreeIntoGraphAndLedger,
   resetMemoryStores,
   tryPutPolledUnique,
   trimStores23ToTargetBytes,
@@ -34,7 +34,10 @@ describe("storage lifecycle (memory)", () => {
       windowId: 4,
     });
     digestQueue.pushDigest(digest);
-    await appendSnapshotAndLedger("https://ex.test/a", crypto.randomUUID(), "snap-text");
+    await mergeTreeIntoGraphAndLedger("https://ex.test/a", crypto.randomUUID(), {
+      text: "",
+      children: [{ text: "snap-text", children: [] }],
+    });
 
     const before = memoryStoresSnapshot();
     expect(before.polled.length).toBe(1);
@@ -51,15 +54,24 @@ describe("storage lifecycle (memory)", () => {
   });
 
   it("trim partial removes oldest snapshots until budget", async () => {
-    await appendSnapshotAndLedger("https://u/", "a", "x".repeat(4000));
-    await appendSnapshotAndLedger("https://u/", "b", "y".repeat(4000));
+    await mergeTreeIntoGraphAndLedger("https://u/", "a", {
+      text: "",
+      children: [{ text: "x".repeat(4000), children: [] }],
+    });
+    await mergeTreeIntoGraphAndLedger("https://u/", "b", {
+      text: "",
+      children: [{ text: "y".repeat(4000), children: [] }],
+    });
     const removed = await trimStores23ToTargetBytes(3000);
     expect(removed).toBeGreaterThan(0);
     expect(await estimateBytesStores23()).toBeLessThanOrEqual(3000);
   });
 
   it("full clear wipes output and ledger", async () => {
-    await appendSnapshotAndLedger("https://u/", "a", "txt");
+    await mergeTreeIntoGraphAndLedger("https://u/", "a", {
+      text: "",
+      children: [{ text: "txt", children: [] }],
+    });
     digestQueue.clearDigestQueue();
     await clearAllStores();
     const snap = memoryStoresSnapshot();

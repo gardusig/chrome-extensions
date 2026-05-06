@@ -65,16 +65,13 @@
       <section class="panel">
         <h3>Storage</h3>
         <label class="row">
-          <span>Force stop when Output+ledger ≥ (MB)</span>
+          <span>Force stop when output ≥ (MB)</span>
           <input id="limit-force-stop-mb" type="number" min="8" max="2048" step="1" />
         </label>
-        <label class="row">
-          <span>Trim target for stores 2+3 (MB)</span>
-          <input id="target-after-cleanup-mb" type="number" min="4" max="1024" step="1" />
-        </label>
         <p class="hint">
-          Force-stop uses processed snapshots + ledger only. Raw polled HTML is cleared on stop.
-          Trim removes oldest snapshots first (Clear → suggestions / Trim old in popup).
+          Force-stop uses output only (merged graphs + ledger + site metadata + request log). Raw
+          HTML is cleared on stop. Use Clear → Clear old in the popup to free about half of current
+          output, or Clear all for a full wipe.
         </p>
       </section>
       <div id="message"></div>

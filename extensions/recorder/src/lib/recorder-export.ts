@@ -1,4 +1,5 @@
-import type { ProcessedByUrlRecord } from "./db";
+import type { ProcessedByUrlRecord, SiteMetadataRecord, SiteRequestLogRecord } from "./db";
+import { graphToDFSIndentedText } from "./merged-text-graph";
 import { createZip } from "./zip";
 
 export function siteFolderFromUrl(url: string): string {
@@ -39,11 +40,47 @@ export function buildZipEntriesFromProcessed(rows: ProcessedByUrlRecord[]): Arra
   return rows.map((row) => {
     const folder = siteFolderFromUrl(row.fullUrl);
     const slug = slugFromUrl(row.fullUrl);
-    const body = row.snapshots.map((s) => s.text.trimEnd()).join("\n----------\n");
+    const body = graphToDFSIndentedText(row.graph);
     return { filename: `${folder}/${slug}.txt`, content: body };
   });
 }
 
-export function buildExportZipBytes(rows: ProcessedByUrlRecord[]): Uint8Array {
-  return createZip(buildZipEntriesFromProcessed(rows));
+function folderFromOrigin(origin: string): string {
+  try {
+    return new URL(origin).hostname.replace(/\./g, "-").toLowerCase() || "site";
+  } catch {
+    return "site";
+  }
+}
+
+export function buildZipEntriesFromSiteMetadata(rows: SiteMetadataRecord[]): Array<{
+  filename: string;
+  content: string;
+}> {
+  return rows.map((row) => ({
+    filename: `${folderFromOrigin(row.origin)}/site-metadata.txt`,
+    content: row.lines.join("\n"),
+  }));
+}
+
+export function buildZipEntriesFromSiteRequests(rows: SiteRequestLogRecord[]): Array<{
+  filename: string;
+  content: string;
+}> {
+  return rows.map((row) => ({
+    filename: `${folderFromOrigin(row.origin)}/site-requests.jsonl`,
+    content: row.entries.map((entry) => JSON.stringify(entry)).join("\n"),
+  }));
+}
+
+export function buildExportZipBytes(
+  rows: ProcessedByUrlRecord[],
+  siteMetadataRows: SiteMetadataRecord[],
+  siteRequestRows: SiteRequestLogRecord[],
+): Uint8Array {
+  return createZip([
+    ...buildZipEntriesFromProcessed(rows),
+    ...buildZipEntriesFromSiteMetadata(siteMetadataRows),
+    ...buildZipEntriesFromSiteRequests(siteRequestRows),
+  ]);
 }

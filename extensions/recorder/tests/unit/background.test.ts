@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChromeMock } from "../support/chrome-mocks";
 
 vi.mock("../../src/lib/db", () => ({
-  appendSnapshotAndLedger: vi.fn(async () => undefined),
+  countLedgerRows: vi.fn(async () => 0),
+  appendSiteRequestLog: vi.fn(async () => undefined),
   clearAllStores: vi.fn(async () => undefined),
   clearPolledUniqueStore: vi.fn(async () => undefined),
   estimateTrimPlanToTargetBytes: vi.fn(async () => ({
@@ -14,6 +15,17 @@ vi.mock("../../src/lib/db", () => ({
   estimateBytesStores23: vi.fn(async () => 40 * 1024 * 1024),
   getPolledUnique: vi.fn(async () => null),
   listProcessedForExport: vi.fn(async () => []),
+  listSiteMetadataForExport: vi.fn(async () => []),
+  listSiteRequestsForExport: vi.fn(async () => []),
+  mergeTreeIntoGraphAndLedger: vi.fn(async () => undefined),
+  mergeSiteMetadataLines: vi.fn(async () => undefined),
+  originFromUrl: vi.fn((url: string) => {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return "unknown://unknown";
+    }
+  }),
   trimStores23ToTargetBytes: vi.fn(async () => 0),
   tryPutPolledUnique: vi.fn(async () => true),
 }));
@@ -30,7 +42,7 @@ describe("background start gating", () => {
 
   it("rejects START_RECORDING when processed output is above limit", async () => {
     const chromeMock = createChromeMock({
-      "recorder:settings": { pollIntervalMs: 500, limitForceStopMb: 32, targetAfterCleanupMb: 16 },
+      "recorder:settings": { pollIntervalMs: 500, limitForceStopMb: 32 },
     });
     vi.stubGlobal("chrome", chromeMock);
 

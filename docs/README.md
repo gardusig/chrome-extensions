@@ -12,11 +12,13 @@ All documentation for this repository lives here (not under individual `extensio
 
 ## Recorder extension
 
-| Document                                                     | Contents                                                                        |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| [recorder-recording-format.md](recorder-recording-format.md) | Exported zip naming, folder layout, `.txt` snapshot blocks, IndexedDB overview. |
-| [recorder-execution-flow.md](recorder-execution-flow.md)     | Start/stop, polling, dedupe, worker, export, clear, force-stop.                 |
-| [recorder-install-verify.md](recorder-install-verify.md)     | Short smoke test after loading unpacked Recorder.                               |
+| Document                                                           | Contents                                                                                                |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| [recorder-system-design.md](recorder-system-design.md)             | Architecture: Chrome processes, components, queue + worker, growth metrics, high/low-level diagrams.    |
+| [recorder-recording-format.md](recorder-recording-format.md)       | Exported zip naming, folder layout, per-URL merged graph `.txt` (tab-indented DFS), IndexedDB overview. |
+| [recorder-execution-flow.md](recorder-execution-flow.md)           | Start/stop, polling, dedupe, worker, merge, export, clear, force-stop.                                  |
+| [recorder-merged-graph-schema.md](recorder-merged-graph-schema.md) | Logical vertices/edges, root pointer, ledger trim, examples.                                            |
+| [recorder-install-verify.md](recorder-install-verify.md)           | Short smoke test after loading unpacked Recorder.                                                       |
 
 ## Repository direction
 

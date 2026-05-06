@@ -17,7 +17,7 @@
           Segoe UI,
           Roboto,
           sans-serif;
-        min-width: 360px;
+        min-width: 272px;
       }
       .container {
         display: grid;
@@ -28,6 +28,7 @@
         padding: 8px;
         border-radius: 8px;
         background: rgba(125, 125, 125, 0.15);
+        white-space: pre-line;
       }
       .stats {
         font-size: 12px;
@@ -90,22 +91,13 @@
         margin-top: 12px;
         flex-wrap: wrap;
       }
-      .suggestions {
-        margin-top: 10px;
-        display: grid;
-        gap: 6px;
-      }
-      .suggestion-btn {
-        text-align: left;
-        font-weight: 500;
-      }
     </style>
   </head>
   <body>
     <div class="container">
       <h3>Recorder</h3>
       <div id="status" class="status">Loading...</div>
-      <div id="stats" class="stats">Snapshots: 0 | URLs: 0</div>
+      <div id="stats" class="stats">Ingests: 0 | URLs: 0</div>
       <div class="controls">
         <button id="start-btn" class="btn-start" type="button">Start</button>
         <button id="stop-btn" class="btn-stop" type="button">Stop</button>
@@ -123,16 +115,15 @@
       <div id="message"></div>
     </div>
     <dialog id="clear-dialog">
-      <p><strong>Clear stored snapshots</strong></p>
+      <p><strong>Clear stored output</strong></p>
       <p style="font-size: 12px; opacity: 0.9">
-        <strong>Trim old</strong> deletes oldest snapshots until under the target size from
-        Options.<br />
-        <strong>Clear all</strong> removes every processed snapshot and the ledger (raw queue is
+        <strong>Clear old</strong> removes the oldest ledger ingests (and vertices introduced then)
+        until output size is about half what it was.<br />
+        <strong>Clear all</strong> wipes merged graphs, ledger, and sidecar logs (raw HTML is
         already cleared when stopped).
       </p>
-      <div id="clear-suggestions" class="suggestions"></div>
       <div class="dlg-actions">
-        <button type="button" id="dlg-trim">Trim old</button>
+        <button type="button" id="dlg-trim">Clear old</button>
         <button type="button" id="dlg-full">Clear all</button>
         <button type="button" id="dlg-cancel">Cancel</button>
       </div>

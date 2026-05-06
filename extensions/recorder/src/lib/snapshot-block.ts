@@ -1,5 +1,6 @@
 import type { HeadMeta } from "./head-meta";
-import { transformHtmlToIndentedText } from "./html-textify";
+import type { TextTreeNode } from "./html-text-tree";
+import { treeToIndentedText } from "./html-text-tree";
 import { redactUrl } from "./redact";
 
 export type RequestSummary = {
@@ -10,18 +11,15 @@ export type RequestSummary = {
   responseBytes?: number | null;
   requestContentType?: string;
   responseContentType?: string;
+  error?: string;
 };
 
-export type SnapshotBlockInput = {
+export type MetadataLinesInput = {
   fullUrl: string;
-  capturedAt: string;
-  tabId: number;
-  windowId: number;
-  title: string;
   headMeta: HeadMeta;
   rawHtml: string;
+  title?: string;
   relatedLinks?: string[];
-  requests?: RequestSummary[];
 };
 
 function extractRelatedLinks(rawHtml: string, pageUrl: string, maxLinks = 50): string[] {
@@ -58,9 +56,12 @@ function extractRelatedLinks(rawHtml: string, pageUrl: string, maxLinks = 50): s
 
 function formatMetaLines(
   meta: HeadMeta,
-  input: Pick<SnapshotBlockInput, "rawHtml" | "fullUrl" | "relatedLinks" | "requests">,
+  input: Pick<MetadataLinesInput, "rawHtml" | "fullUrl" | "relatedLinks" | "title">,
 ): string[] {
   const lines: string[] = [];
+  if (input.title) {
+    lines.push(`title: ${input.title}`);
+  }
   if (meta.title) {
     lines.push(`document_title: ${meta.title}`);
   }
@@ -92,32 +93,54 @@ function formatMetaLines(
       lines.push(`  - ${link}`);
     }
   }
-  if (input.requests && input.requests.length > 0) {
-    lines.push("requests:");
-    for (const request of input.requests) {
-      lines.push(`  - method: ${request.method}`);
-      lines.push(`    url: ${request.url}`);
-      if (request.requestPayloadBytes !== undefined) {
-        lines.push(`    requestPayloadBytes: ${request.requestPayloadBytes ?? "unknown"}`);
-      }
-      if (request.responseStatus !== undefined) {
-        lines.push(`    responseStatus: ${request.responseStatus}`);
-      }
-      if (request.responseBytes !== undefined) {
-        lines.push(`    responseBytes: ${request.responseBytes ?? "unknown"}`);
-      }
-      if (request.requestContentType) {
-        lines.push(`    requestContentType: ${request.requestContentType}`);
-      }
-      if (request.responseContentType) {
-        lines.push(`    responseContentType: ${request.responseContentType}`);
-      }
+  return lines;
+}
+
+export function formatRequestSummaryLines(requests: RequestSummary[]): string[] {
+  if (requests.length === 0) {
+    return [];
+  }
+  const lines: string[] = [];
+  lines.push("requests:");
+  for (const request of requests) {
+    lines.push(`  - method: ${request.method}`);
+    lines.push(`    url: ${request.url}`);
+    if (request.requestPayloadBytes !== undefined) {
+      lines.push(`    requestPayloadBytes: ${request.requestPayloadBytes ?? "unknown"}`);
+    }
+    if (request.responseStatus !== undefined) {
+      lines.push(`    responseStatus: ${request.responseStatus}`);
+    }
+    if (request.responseBytes !== undefined) {
+      lines.push(`    responseBytes: ${request.responseBytes ?? "unknown"}`);
+    }
+    if (request.requestContentType) {
+      lines.push(`    requestContentType: ${request.requestContentType}`);
+    }
+    if (request.responseContentType) {
+      lines.push(`    responseContentType: ${request.responseContentType}`);
+    }
+    if (request.error) {
+      lines.push(`    error: ${request.error}`);
     }
   }
   return lines;
 }
 
-/** One snapshot block: §H page_metadata + page_content (default tree outline §I.2). */
+export function buildSiteMetadataLines(input: MetadataLinesInput): string[] {
+  return [`url: ${input.fullUrl}`, ...formatMetaLines(input.headMeta, input)];
+}
+
+export type SnapshotBlockInput = {
+  fullUrl: string;
+  capturedAt: string;
+  tabId: number;
+  windowId: number;
+  title: string;
+  tree: TextTreeNode;
+};
+
+/** One snapshot block: page metadata + tree-based page content outline. */
 export function buildSnapshotBlockText(input: SnapshotBlockInput): string {
   const metaLines = [
     `url: ${input.fullUrl}`,
@@ -125,11 +148,8 @@ export function buildSnapshotBlockText(input: SnapshotBlockInput): string {
     `tab_id: ${input.tabId}`,
     `window_id: ${input.windowId}`,
     `title: ${input.title}`,
-    ...formatMetaLines(input.headMeta, input),
   ];
-
-  const pageContent = transformHtmlToIndentedText(input.rawHtml).trimEnd();
-
+  const pageContent = treeToIndentedText(input.tree).trimEnd();
   return [
     "page_metadata:",
     ...metaLines.map((l) => `  ${l}`),
@@ -138,4 +158,8 @@ export function buildSnapshotBlockText(input: SnapshotBlockInput): string {
     ...pageContent.split("\n").map((l) => (l.length ? `  ${l}` : "")),
     "",
   ].join("\n");
+}
+
+export function buildSnapshotOutlineText(tree: TextTreeNode): string {
+  return treeToIndentedText(tree).trimEnd();
 }

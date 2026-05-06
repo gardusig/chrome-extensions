@@ -1,4 +1,4 @@
-import type { ClearSuggestion, RecorderSettings, RecorderState, SessionStats } from "./lib/schema";
+import type { RecorderSettings, RecorderState, SessionStats } from "./lib/schema";
 
 type BackgroundResponse<T = unknown> = {
   ok: boolean;
@@ -18,7 +18,6 @@ const clearDialog = document.querySelector<HTMLDialogElement>("#clear-dialog");
 const dlgTrim = document.querySelector<HTMLButtonElement>("#dlg-trim");
 const dlgFull = document.querySelector<HTMLButtonElement>("#dlg-full");
 const dlgCancel = document.querySelector<HTMLButtonElement>("#dlg-cancel");
-const clearSuggestionsEl = document.querySelector<HTMLDivElement>("#clear-suggestions");
 
 let latestState: RecorderState | null = null;
 let latestSettings: RecorderSettings | null = null;
@@ -37,8 +36,7 @@ function assertElements(): void {
     !clearDialog ||
     !dlgTrim ||
     !dlgFull ||
-    !dlgCancel ||
-    !clearSuggestionsEl
+    !dlgCancel
   ) {
     throw new Error("Popup DOM elements are missing.");
   }
@@ -57,7 +55,7 @@ function renderState(state: RecorderState): void {
   const statusText = state.isRecording
     ? `Recording${state.sessionId ? ` (${state.sessionId.slice(0, 8)}…)` : ""}`
     : `Stopped${state.forceStoppedForLimit ? " — storage limit reached" : ""}`;
-  statusEl!.textContent = `${statusText} · Raw ${rawMb} MB · Output+ledger ${procMb} MB · Total ${totalMb} MB`;
+  statusEl!.textContent = `${statusText}\nRaw ${rawMb} MB\nOutput ${procMb} MB\nTotal ${totalMb} MB`;
   const settingsLimitBytes = (latestSettings?.limitForceStopMb ?? 32) * 1024 * 1024;
   const blockedByLimit =
     state.recordingBlockedForLimit ||
@@ -70,7 +68,7 @@ function renderState(state: RecorderState): void {
 }
 
 function renderStats(stats: SessionStats): void {
-  statsEl!.textContent = `Snapshots: ${stats.snapshotCount} | URLs: ${stats.urlCount} · Output+ledger ${(
+  statsEl!.textContent = `Ingests: ${stats.snapshotCount} | URLs: ${stats.urlCount} · Output ${(
     stats.storageBytesProcessed /
     (1024 * 1024)
   ).toFixed(2)} MB`;
@@ -88,57 +86,12 @@ function setBusy(nextBusy: boolean): void {
   clearBtn!.disabled = nextBusy;
 }
 
-function renderClearSuggestions(suggestions: ClearSuggestion[]): void {
-  clearSuggestionsEl!.innerHTML = "";
-  if (suggestions.length === 0) {
-    const p = document.createElement("p");
-    p.style.fontSize = "12px";
-    p.style.opacity = "0.85";
-    p.textContent = "No trim suggestions right now.";
-    clearSuggestionsEl!.appendChild(p);
-    return;
-  }
-  for (const suggestion of suggestions) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "suggestion-btn";
-    const freedMb = (suggestion.estimatedBytesFreed / (1024 * 1024)).toFixed(2);
-    const projectedMb = (suggestion.projectedBytesAfter / (1024 * 1024)).toFixed(2);
-    button.textContent = `${suggestion.label} — remove ~${suggestion.snapshotsToRemove}, free ~${freedMb} MB (after: ${projectedMb} MB)`;
-    button.addEventListener("click", () => {
-      clearDialog!.close();
-      void withButtonAction(async () => {
-        const response = await chrome.runtime.sendMessage({
-          type: "CLEAR_TRIM_TO_TARGET",
-          payload: { targetBytes: suggestion.targetBytes },
-        });
-        if (!response.ok) {
-          throw new Error(response.error ?? "Trim failed.");
-        }
-        await refreshState();
-        await refreshStats();
-        setMessage("Trimmed oldest snapshots.");
-      });
-    });
-    clearSuggestionsEl!.appendChild(button);
-  }
-}
-
 async function refreshSettings(): Promise<void> {
   const response = await sendMessage<{ settings: RecorderSettings }>("GET_SETTINGS");
   if (!response.ok || !response.settings) {
     return;
   }
   latestSettings = response.settings;
-}
-
-async function refreshClearSuggestions(): Promise<void> {
-  const response = await sendMessage<{ suggestions: ClearSuggestion[] }>("GET_CLEAR_SUGGESTIONS");
-  if (!response.ok || !response.suggestions) {
-    renderClearSuggestions([]);
-    return;
-  }
-  renderClearSuggestions(response.suggestions);
 }
 
 async function sendMessage<T = unknown>(type: string): Promise<BackgroundResponse<T>> {
@@ -211,17 +164,14 @@ function wireEvents(): void {
         throw new Error(response.error ?? "Export failed.");
       }
       setMessage(
-        `Exported ${response.snapshotCount ?? 0} snapshots across ${response.urlCount ?? 0} URLs.`,
+        `Exported ${response.snapshotCount ?? 0} ingests across ${response.urlCount ?? 0} URLs.`,
       );
       await refreshStats();
     });
   });
 
   clearBtn!.addEventListener("click", () => {
-    void withButtonAction(async () => {
-      await refreshClearSuggestions();
-      clearDialog!.showModal();
-    });
+    clearDialog!.showModal();
   });
 
   dlgCancel!.addEventListener("click", () => {
@@ -233,11 +183,11 @@ function wireEvents(): void {
     void withButtonAction(async () => {
       const response = await chrome.runtime.sendMessage({ type: "CLEAR_TRIM" });
       if (!response.ok) {
-        throw new Error(response.error ?? "Trim failed.");
+        throw new Error(response.error ?? "Clear failed.");
       }
       await refreshState();
       await refreshStats();
-      setMessage("Trimmed oldest snapshots.");
+      setMessage("Cleared oldest output (~half size).");
     });
   });
 
@@ -250,7 +200,7 @@ function wireEvents(): void {
       }
       await refreshState();
       await refreshStats();
-      setMessage("All snapshot data cleared.");
+      setMessage("All stored output cleared.");
     });
   });
 

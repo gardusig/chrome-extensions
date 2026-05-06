@@ -4,20 +4,22 @@
 [![Node](https://img.shields.io/badge/node-22.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-Chrome extension (MV3) that **samples open tabs on a timer**, dedupes captures by **SHA-256** of the full HTML, stores raw HTML in IndexedDB, processes it into **tree-outline text snapshots** per URL, and lets you **export** a zip when recording is **stopped**.
+Chrome extension (MV3) that **samples open tabs on a timer**, dedupes captures by **SHA-256** of the full HTML, stores raw HTML in IndexedDB, merges captures into a **per-URL text graph** (deduped vertices + parent/child edges), and lets you **export** a zip when recording is **stopped**.
 
 ## Documentation
 
 All docs live in the repo **`docs/`** folder (not here):
 
-| Topic                           | Link                                                                         |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| Build & load unpacked           | [docs/local-development.md](../../docs/local-development.md)                 |
-| Store publish & profile install | [docs/chrome-web-store-release.md](../../docs/chrome-web-store-release.md)   |
-| Export zip layout               | [docs/recorder-recording-format.md](../../docs/recorder-recording-format.md) |
-| Pipeline behavior               | [docs/recorder-execution-flow.md](../../docs/recorder-execution-flow.md)     |
-| Smoke test                      | [docs/recorder-install-verify.md](../../docs/recorder-install-verify.md)     |
-| Doc index                       | [docs/README.md](../../docs/README.md)                                       |
+| Topic                           | Link                                                                               |
+| ------------------------------- | ---------------------------------------------------------------------------------- |
+| System design                   | [docs/recorder-system-design.md](../../docs/recorder-system-design.md)             |
+| Build & load unpacked           | [docs/local-development.md](../../docs/local-development.md)                       |
+| Store publish & profile install | [docs/chrome-web-store-release.md](../../docs/chrome-web-store-release.md)         |
+| Export zip layout               | [docs/recorder-recording-format.md](../../docs/recorder-recording-format.md)       |
+| Merged graph schema             | [docs/recorder-merged-graph-schema.md](../../docs/recorder-merged-graph-schema.md) |
+| Pipeline behavior               | [docs/recorder-execution-flow.md](../../docs/recorder-execution-flow.md)           |
+| Smoke test                      | [docs/recorder-install-verify.md](../../docs/recorder-install-verify.md)           |
+| Doc index                       | [docs/README.md](../../docs/README.md)                                             |
 
 ## Requirements
 
@@ -37,17 +39,17 @@ Or run `npm run setup:browser` for copy-paste instructions after a build.
 
 ## Usage
 
-1. **Options** — poll interval (ms), force-stop limit for **Output+ledger** (MB), trim target (MB).
+1. **Options** — poll interval (ms), force-stop limit for **output** (MB).
 2. Popup — **Start** / **Stop**; **Export** and **Clear…** are enabled only when **not** recording.
-   - If the recorder was force-stopped for size, Start stays disabled until Output+ledger drops under the configured limit.
-   - Clear dialog includes full wipe and oldest-first trim suggestions.
+   - If the recorder was force-stopped for size, Start stays disabled until output drops under the configured limit.
+   - **Clear…** offers **Clear old** (~half current output) or **Clear all**.
 3. Export downloads `recorder-session-YYYY-MM-DDTHH-mm-ss.zip` (UTC timestamp) into Downloads.
 
 ### Storage behavior
 
-- Force-stop checks stores **2+3** only (processed output + ledger).
+- Force-stop checks stores **2+3** only (output graph + ledger).
 - Store **1** (`polled_unique`, raw HTML queue) is cleared when recording stops.
-- After stop, output+ledger remains available for export or trim.
+- After stop, output remains available for export or **Clear old** / **Clear all**.
 
 ### Metadata additions
 

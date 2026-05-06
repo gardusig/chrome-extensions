@@ -20,7 +20,6 @@ function mountPopupDom(): void {
     <button id="clear-btn" type="button">Clear</button>
     <button id="open-settings-btn" type="button">Settings</button>
     <dialog id="clear-dialog"></dialog>
-    <div id="clear-suggestions"></div>
     <button id="dlg-trim" type="button">Trim</button>
     <button id="dlg-full" type="button">Full</button>
     <button id="dlg-cancel" type="button">Cancel</button>
@@ -82,7 +81,7 @@ describe("popup", () => {
       if (type === "GET_SETTINGS") {
         return {
           ok: true,
-          settings: { pollIntervalMs: 500, limitForceStopMb: 32, targetAfterCleanupMb: 16 },
+          settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
         };
       }
       return { ok: true };
@@ -111,7 +110,7 @@ describe("popup", () => {
         if (type === "GET_SETTINGS") {
           return {
             ok: true,
-            settings: { pollIntervalMs: 500, limitForceStopMb: 32, targetAfterCleanupMb: 16 },
+            settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
           };
         }
         if (type === "STOP_RECORDING") {
@@ -134,7 +133,7 @@ describe("popup", () => {
     expect(types).toContain("STOP_RECORDING");
   });
 
-  it("sends CLEAR_TRIM from the clear dialog", async () => {
+  it("opens clear dialog without fetching suggestions", async () => {
     const chromeMock = createChromeMock();
     const sendSpy = vi
       .spyOn(chromeMock.runtime, "sendMessage")
@@ -149,11 +148,8 @@ describe("popup", () => {
         if (type === "GET_SETTINGS") {
           return {
             ok: true,
-            settings: { pollIntervalMs: 500, limitForceStopMb: 32, targetAfterCleanupMb: 16 },
+            settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
           };
-        }
-        if (type === "GET_CLEAR_SUGGESTIONS") {
-          return { ok: true, suggestions: [] };
         }
         if (type === "CLEAR_TRIM") {
           return { ok: true };
@@ -166,6 +162,13 @@ describe("popup", () => {
     await flushMicrotasks();
 
     (document.querySelector("#clear-btn") as HTMLButtonElement).click();
+    await flushMicrotasks();
+
+    expect(sendSpy.mock.calls.map((c) => (c[0] as { type?: string }).type)).not.toContain(
+      "GET_CLEAR_SUGGESTIONS",
+    );
+    expect(document.querySelector("#clear-dialog")?.hasAttribute("open")).toBe(true);
+
     (document.querySelector("#dlg-trim") as HTMLButtonElement).click();
     await flushMicrotasks();
 
@@ -192,7 +195,7 @@ describe("popup", () => {
       if (type === "GET_SETTINGS") {
         return {
           ok: true,
-          settings: { pollIntervalMs: 500, limitForceStopMb: 32, targetAfterCleanupMb: 16 },
+          settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
         };
       }
       if (type === "GET_SESSION_STATS") {

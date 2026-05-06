@@ -13,7 +13,6 @@ function mountOptionsDom(): void {
   document.body.innerHTML = `
     <input id="poll-interval" type="number" />
     <input id="limit-force-stop-mb" type="number" />
-    <input id="target-after-cleanup-mb" type="number" />
     <div id="message"></div>
   `;
 }
@@ -28,7 +27,6 @@ describe("options", () => {
     const settings: RecorderSettings = {
       pollIntervalMs: 250,
       limitForceStopMb: 32,
-      targetAfterCleanupMb: 16,
     };
 
     const chromeMock = createChromeMock();
@@ -47,16 +45,12 @@ describe("options", () => {
 
     expect((document.querySelector("#poll-interval") as HTMLInputElement).value).toBe("250");
     expect((document.querySelector("#limit-force-stop-mb") as HTMLInputElement).value).toBe("32");
-    expect((document.querySelector("#target-after-cleanup-mb") as HTMLInputElement).value).toBe(
-      "16",
-    );
   });
 
   it("persists on change via UPDATE_SETTINGS", async () => {
     const settings: RecorderSettings = {
       pollIntervalMs: 200,
       limitForceStopMb: 64,
-      targetAfterCleanupMb: 32,
     };
 
     const chromeMock = createChromeMock();

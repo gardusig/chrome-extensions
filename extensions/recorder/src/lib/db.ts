@@ -1,4 +1,10 @@
 import type { HeadMeta } from "./head-meta";
+import type { TextTreeNode } from "./html-text-tree";
+import {
+  mergeTextTreeIntoGraph,
+  removeVerticesIntroducedByLedgerSeq,
+  type MergedTextGraph,
+} from "./merged-text-graph";
 
 export type PolledUniqueRecord = {
   digest: string;
@@ -11,14 +17,35 @@ export type PolledUniqueRecord = {
   headMeta?: HeadMeta;
 };
 
-export type SnapshotEntry = {
-  id: string;
-  text: string;
-};
+type PolledMetaRecord = Omit<PolledUniqueRecord, "rawHtml">;
+type RawHtmlRecord = { digest: string; rawHtml: string };
 
 export type ProcessedByUrlRecord = {
   fullUrl: string;
-  snapshots: SnapshotEntry[];
+  graph: MergedTextGraph;
+};
+
+export type SiteMetadataRecord = {
+  origin: string;
+  lines: string[];
+};
+
+export type SiteRequestMetric = {
+  at: string;
+  pageUrl?: string;
+  url: string;
+  method: string;
+  requestPayloadBytes?: number | null;
+  requestContentType?: string;
+  responseStatus?: number;
+  responseBytes?: number | null;
+  responseContentType?: string;
+  error?: string;
+};
+
+export type SiteRequestLogRecord = {
+  origin: string;
+  entries: SiteRequestMetric[];
 };
 
 export type LedgerStored = {
@@ -35,13 +62,20 @@ export type TrimPlan = {
 };
 
 const DB_NAME = "recorder-idb";
-const DB_VERSION = 3;
-const STORE_POLLED = "polled_unique";
+const DB_VERSION = 6;
+const STORE_RAW_HTML = "raw_html_by_digest";
+const STORE_POLLED_META = "poll_meta_by_digest";
 const STORE_PROCESSED = "processed_by_url";
 const STORE_LEDGER = "snapshot_ledger";
+const STORE_SITE_METADATA = "site_metadata_lines";
+const STORE_SITE_REQUESTS = "site_request_log";
 
 function utf8Len(s: string): number {
   return new TextEncoder().encode(s).length;
+}
+
+function safeJsonLen(value: unknown): number {
+  return utf8Len(JSON.stringify(value));
 }
 
 function hasIndexedDb(): boolean {
@@ -51,16 +85,21 @@ function hasIndexedDb(): boolean {
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 type MemoryState = {
-  polled: Map<string, PolledUniqueRecord>;
+  rawHtml: Map<string, RawHtmlRecord>;
+  polledMeta: Map<string, PolledMetaRecord>;
   processed: Map<string, ProcessedByUrlRecord>;
-  /** seq -> ledger row */
+  siteMetadata: Map<string, SiteMetadataRecord>;
+  siteRequests: Map<string, SiteRequestLogRecord>;
   ledger: Map<number, LedgerStored>;
   nextLedgerSeq: number;
 };
 
 const memory: MemoryState = {
-  polled: new Map(),
+  rawHtml: new Map(),
+  polledMeta: new Map(),
   processed: new Map(),
+  siteMetadata: new Map(),
+  siteRequests: new Map(),
   ledger: new Map(),
   nextLedgerSeq: 1,
 };
@@ -80,6 +119,14 @@ function reqToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
+export function originFromUrl(url: string): string {
+  try {
+    return new URL(url).origin.toLowerCase();
+  } catch {
+    return "unknown://unknown";
+  }
+}
+
 export function openDb(): Promise<IDBDatabase> {
   if (!hasIndexedDb()) {
     return Promise.reject(new Error("indexedDB unavailable"));
@@ -93,31 +140,21 @@ export function openDb(): Promise<IDBDatabase> {
     request.onupgradeneeded = (event) => {
       const db = request.result;
       const oldVersion = event.oldVersion;
-      if (oldVersion < 3) {
+      if (oldVersion < 6) {
         for (const name of Array.from(db.objectStoreNames)) {
           db.deleteObjectStore(name);
         }
-        db.createObjectStore(STORE_POLLED, { keyPath: "digest" });
+        db.createObjectStore(STORE_RAW_HTML, { keyPath: "digest" });
+        db.createObjectStore(STORE_POLLED_META, { keyPath: "digest" });
         db.createObjectStore(STORE_PROCESSED, { keyPath: "fullUrl" });
         db.createObjectStore(STORE_LEDGER, { autoIncrement: true });
+        db.createObjectStore(STORE_SITE_METADATA, { keyPath: "origin" });
+        db.createObjectStore(STORE_SITE_REQUESTS, { keyPath: "origin" });
       }
     };
     request.onsuccess = () => resolve(request.result);
   });
   return dbPromise;
-}
-
-async function listAllPolled(): Promise<PolledUniqueRecord[]> {
-  if (!hasIndexedDb()) {
-    return [...memory.polled.values()];
-  }
-  const db = await openDb();
-  const tx = db.transaction(STORE_POLLED, "readonly");
-  const rows = await reqToPromise(
-    tx.objectStore(STORE_POLLED).getAll() as IDBRequest<PolledUniqueRecord[]>,
-  );
-  await txDone(tx);
-  return rows;
 }
 
 async function listAllProcessed(): Promise<ProcessedByUrlRecord[]> {
@@ -133,31 +170,79 @@ async function listAllProcessed(): Promise<ProcessedByUrlRecord[]> {
   return rows;
 }
 
-/** Estimated bytes for store 1 only. */
+async function listAllSiteMetadata(): Promise<SiteMetadataRecord[]> {
+  if (!hasIndexedDb()) {
+    return [...memory.siteMetadata.values()];
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_SITE_METADATA, "readonly");
+  const rows = await reqToPromise(
+    tx.objectStore(STORE_SITE_METADATA).getAll() as IDBRequest<SiteMetadataRecord[]>,
+  );
+  await txDone(tx);
+  return rows;
+}
+
+async function listAllSiteRequests(): Promise<SiteRequestLogRecord[]> {
+  if (!hasIndexedDb()) {
+    return [...memory.siteRequests.values()];
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_SITE_REQUESTS, "readonly");
+  const rows = await reqToPromise(
+    tx.objectStore(STORE_SITE_REQUESTS).getAll() as IDBRequest<SiteRequestLogRecord[]>,
+  );
+  await txDone(tx);
+  return rows;
+}
+
+/** Estimated bytes for store 1 only (raw html + poll metadata by digest). */
 export async function estimateBytesStore1(): Promise<number> {
-  const rows = await listAllPolled();
+  if (!hasIndexedDb()) {
+    let sum = 0;
+    for (const [, raw] of memory.rawHtml) {
+      sum += utf8Len(raw.digest) + utf8Len(raw.rawHtml) + 48;
+    }
+    for (const [, meta] of memory.polledMeta) {
+      sum += safeJsonLen(meta) + 48;
+    }
+    return sum;
+  }
+  const db = await openDb();
+  const tx = db.transaction([STORE_RAW_HTML, STORE_POLLED_META], "readonly");
+  const rawRows = await reqToPromise(
+    tx.objectStore(STORE_RAW_HTML).getAll() as IDBRequest<RawHtmlRecord[]>,
+  );
+  const metaRows = await reqToPromise(
+    tx.objectStore(STORE_POLLED_META).getAll() as IDBRequest<PolledMetaRecord[]>,
+  );
+  await txDone(tx);
   let sum = 0;
-  for (const row of rows) {
-    sum +=
-      utf8Len(row.digest) +
-      utf8Len(row.rawHtml) +
-      utf8Len(row.fullUrl) +
-      utf8Len(row.title) +
-      utf8Len(row.capturedAt) +
-      96;
+  for (const row of rawRows) {
+    sum += utf8Len(row.digest) + utf8Len(row.rawHtml) + 48;
+  }
+  for (const row of metaRows) {
+    sum += safeJsonLen(row) + 48;
   }
   return sum;
 }
 
-/** Estimated bytes for stores 2 + 3 (processed snapshots + ledger rows). */
+/** Estimated bytes for stores 2 + 3 + site metadata + request logs. */
 export async function estimateBytesStores23(): Promise<number> {
-  const processed = await listAllProcessed();
+  const [processed, siteMetadata, siteRequests] = await Promise.all([
+    listAllProcessed(),
+    listAllSiteMetadata(),
+    listAllSiteRequests(),
+  ]);
   let sum = 0;
   for (const row of processed) {
-    sum += utf8Len(row.fullUrl);
-    for (const s of row.snapshots) {
-      sum += utf8Len(s.id) + utf8Len(s.text) + 32;
-    }
+    sum += utf8Len(row.fullUrl) + safeJsonLen(row.graph) + 32;
+  }
+  for (const row of siteMetadata) {
+    sum += utf8Len(row.origin) + safeJsonLen(row.lines) + 32;
+  }
+  for (const row of siteRequests) {
+    sum += utf8Len(row.origin) + safeJsonLen(row.entries) + 32;
   }
   if (!hasIndexedDb()) {
     for (const [, ledgerRow] of memory.ledger) {
@@ -229,49 +314,75 @@ export async function estimateBytesTotal123(): Promise<number> {
 
 export async function getPolledUnique(digest: string): Promise<PolledUniqueRecord | null> {
   if (!hasIndexedDb()) {
-    return memory.polled.get(digest) ?? null;
+    const meta = memory.polledMeta.get(digest);
+    const raw = memory.rawHtml.get(digest);
+    if (!meta || !raw) {
+      return null;
+    }
+    return { ...meta, rawHtml: raw.rawHtml };
   }
   const db = await openDb();
-  const tx = db.transaction(STORE_POLLED, "readonly");
-  const row = await reqToPromise(
-    tx.objectStore(STORE_POLLED).get(digest) as IDBRequest<PolledUniqueRecord | undefined>,
+  const tx = db.transaction([STORE_POLLED_META, STORE_RAW_HTML], "readonly");
+  const meta = await reqToPromise(
+    tx.objectStore(STORE_POLLED_META).get(digest) as IDBRequest<PolledMetaRecord | undefined>,
+  );
+  const raw = await reqToPromise(
+    tx.objectStore(STORE_RAW_HTML).get(digest) as IDBRequest<RawHtmlRecord | undefined>,
   );
   await txDone(tx);
-  return row ?? null;
+  if (!meta || !raw) {
+    return null;
+  }
+  return { ...meta, rawHtml: raw.rawHtml };
 }
 
-/** Insert raw poll row and return whether insert happened (false if digest existed). */
+/** Insert split raw + metadata rows and return whether insert happened (false if digest existed). */
 export async function tryPutPolledUnique(record: PolledUniqueRecord): Promise<boolean> {
+  const meta: PolledMetaRecord = {
+    digest: record.digest,
+    fullUrl: record.fullUrl,
+    title: record.title,
+    capturedAt: record.capturedAt,
+    tabId: record.tabId,
+    windowId: record.windowId,
+    headMeta: record.headMeta,
+  };
+  const raw: RawHtmlRecord = { digest: record.digest, rawHtml: record.rawHtml };
+
   if (!hasIndexedDb()) {
-    if (memory.polled.has(record.digest)) {
+    if (memory.polledMeta.has(record.digest)) {
       return false;
     }
-    memory.polled.set(record.digest, record);
+    memory.polledMeta.set(record.digest, meta);
+    memory.rawHtml.set(record.digest, raw);
     return true;
   }
   const db = await openDb();
-  const tx = db.transaction(STORE_POLLED, "readwrite");
-  const store = tx.objectStore(STORE_POLLED);
+  const tx = db.transaction([STORE_POLLED_META, STORE_RAW_HTML], "readwrite");
+  const metaStore = tx.objectStore(STORE_POLLED_META);
   const existing = await reqToPromise(
-    store.get(record.digest) as IDBRequest<PolledUniqueRecord | undefined>,
+    metaStore.get(record.digest) as IDBRequest<PolledMetaRecord | undefined>,
   );
   if (existing) {
     await txDone(tx);
     return false;
   }
-  store.put(record);
+  metaStore.put(meta);
+  tx.objectStore(STORE_RAW_HTML).put(raw);
   await txDone(tx);
   return true;
 }
 
 export async function clearPolledUniqueStore(): Promise<void> {
   if (!hasIndexedDb()) {
-    memory.polled.clear();
+    memory.polledMeta.clear();
+    memory.rawHtml.clear();
     return;
   }
   const db = await openDb();
-  const tx = db.transaction(STORE_POLLED, "readwrite");
-  tx.objectStore(STORE_POLLED).clear();
+  const tx = db.transaction([STORE_POLLED_META, STORE_RAW_HTML], "readwrite");
+  tx.objectStore(STORE_POLLED_META).clear();
+  tx.objectStore(STORE_RAW_HTML).clear();
   await txDone(tx);
 }
 
@@ -288,21 +399,46 @@ export async function getProcessedByUrl(fullUrl: string): Promise<ProcessedByUrl
   return row ?? null;
 }
 
-/** Append snapshot text + ledger row atomically. */
-export async function appendSnapshotAndLedger(
+function estimateProcessedRowBytes(row: ProcessedByUrlRecord | null): number {
+  if (!row) {
+    return 0;
+  }
+  return utf8Len(row.fullUrl) + safeJsonLen(row.graph) + 32;
+}
+
+async function nextLedgerSeqFromStore(store: IDBObjectStore): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const rq = store.openCursor(null, "prev");
+    rq.onerror = () => reject(rq.error);
+    rq.onsuccess = () => {
+      const cursor = rq.result as IDBCursorWithValue | null;
+      if (!cursor) {
+        resolve(1);
+        return;
+      }
+      resolve((cursor.key as number) + 1);
+    };
+  });
+}
+
+/** Merge tree into per-URL graph and append ledger row atomically. */
+export async function mergeTreeIntoGraphAndLedger(
   fullUrl: string,
   snapshotId: string,
-  text: string,
+  tree: TextTreeNode,
 ): Promise<void> {
   const createdAt = new Date().toISOString();
-  const bytesEstimate = utf8Len(text) + 64;
 
   if (!hasIndexedDb()) {
-    const existing = memory.processed.get(fullUrl);
-    const snapshots = [...(existing?.snapshots ?? []), { id: snapshotId, text }];
-    memory.processed.set(fullUrl, { fullUrl, snapshots });
     const seq = memory.nextLedgerSeq;
     memory.nextLedgerSeq += 1;
+    const before = memory.processed.get(fullUrl) ?? null;
+    const merged = await mergeTextTreeIntoGraph(before?.graph, tree, seq);
+    const nextRow: ProcessedByUrlRecord = { fullUrl, graph: merged.graph };
+    memory.processed.set(fullUrl, nextRow);
+    const beforeBytes = estimateProcessedRowBytes(before);
+    const afterBytes = estimateProcessedRowBytes(nextRow);
+    const bytesEstimate = Math.max(64, afterBytes - beforeBytes);
     memory.ledger.set(seq, { snapshotId, fullUrl, createdAt, bytesEstimate });
     return;
   }
@@ -315,10 +451,74 @@ export async function appendSnapshotAndLedger(
   const prev = await reqToPromise(
     pStore.get(fullUrl) as IDBRequest<ProcessedByUrlRecord | undefined>,
   );
-  const snapshots = [...(prev?.snapshots ?? []), { id: snapshotId, text }];
-  pStore.put({ fullUrl, snapshots });
-  lStore.put({ snapshotId, fullUrl, createdAt, bytesEstimate });
+  const seq = await nextLedgerSeqFromStore(lStore);
+  const merged = await mergeTextTreeIntoGraph(prev?.graph, tree, seq);
+  const nextRow: ProcessedByUrlRecord = { fullUrl, graph: merged.graph };
+  pStore.put(nextRow);
 
+  const beforeBytes = estimateProcessedRowBytes(prev ?? null);
+  const afterBytes = estimateProcessedRowBytes(nextRow);
+  const bytesEstimate = Math.max(64, afterBytes - beforeBytes);
+  lStore.put({ snapshotId, fullUrl, createdAt, bytesEstimate }, seq);
+
+  await txDone(tx);
+}
+
+export async function mergeSiteMetadataLines(origin: string, lines: string[]): Promise<void> {
+  if (lines.length === 0) {
+    return;
+  }
+  const dedup = new Set(lines.map((line) => line.trim()).filter((line) => line.length > 0));
+  if (dedup.size === 0) {
+    return;
+  }
+  if (!hasIndexedDb()) {
+    const existing = memory.siteMetadata.get(origin);
+    const merged = new Set(existing?.lines ?? []);
+    for (const line of dedup) {
+      merged.add(line);
+    }
+    memory.siteMetadata.set(origin, { origin, lines: [...merged].sort() });
+    return;
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_SITE_METADATA, "readwrite");
+  const store = tx.objectStore(STORE_SITE_METADATA);
+  const existing = await reqToPromise(
+    store.get(origin) as IDBRequest<SiteMetadataRecord | undefined>,
+  );
+  const merged = new Set(existing?.lines ?? []);
+  for (const line of dedup) {
+    merged.add(line);
+  }
+  store.put({ origin, lines: [...merged].sort() });
+  await txDone(tx);
+}
+
+export async function appendSiteRequestLog(
+  origin: string,
+  entry: SiteRequestMetric,
+  maxEntriesPerOrigin = 2000,
+): Promise<void> {
+  if (!hasIndexedDb()) {
+    const current = [...(memory.siteRequests.get(origin)?.entries ?? []), entry];
+    while (current.length > maxEntriesPerOrigin) {
+      current.shift();
+    }
+    memory.siteRequests.set(origin, { origin, entries: current });
+    return;
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_SITE_REQUESTS, "readwrite");
+  const store = tx.objectStore(STORE_SITE_REQUESTS);
+  const prev = await reqToPromise(
+    store.get(origin) as IDBRequest<SiteRequestLogRecord | undefined>,
+  );
+  const entries = [...(prev?.entries ?? []), entry];
+  while (entries.length > maxEntriesPerOrigin) {
+    entries.shift();
+  }
+  store.put({ origin, entries });
   await txDone(tx);
 }
 
@@ -326,7 +526,7 @@ export async function trimStores23ToTargetBytes(targetBytes: number): Promise<nu
   let removed = 0;
   let total = await estimateBytesStores23();
   while (total > targetBytes) {
-    const next = await deleteOldestLedgerAndSnapshot();
+    const next = await deleteOldestLedgerAndGraphContribution();
     if (!next) {
       break;
     }
@@ -362,7 +562,7 @@ export async function estimateTrimPlanToTargetBytes(targetBytes: number): Promis
   return { snapshotsToRemove, estimatedBytesFreed, projectedBytesAfter };
 }
 
-async function deleteOldestLedgerAndSnapshot(): Promise<boolean> {
+async function deleteOldestLedgerAndGraphContribution(): Promise<boolean> {
   if (!hasIndexedDb()) {
     const keys = [...memory.ledger.keys()].sort((a, b) => a - b);
     const seq = keys[0];
@@ -376,11 +576,11 @@ async function deleteOldestLedgerAndSnapshot(): Promise<boolean> {
     }
     const proc = memory.processed.get(row.fullUrl);
     if (proc) {
-      const snapshots = proc.snapshots.filter((s) => s.id !== row.snapshotId);
-      if (snapshots.length === 0) {
+      const pruned = removeVerticesIntroducedByLedgerSeq(proc.graph, seq).graph;
+      if (Object.keys(pruned.vertices).length === 0) {
         memory.processed.delete(row.fullUrl);
       } else {
-        memory.processed.set(row.fullUrl, { fullUrl: row.fullUrl, snapshots });
+        memory.processed.set(row.fullUrl, { fullUrl: row.fullUrl, graph: pruned });
       }
     }
     return true;
@@ -400,11 +600,11 @@ async function deleteOldestLedgerAndSnapshot(): Promise<boolean> {
     pStore.get(ledgerRow.fullUrl) as IDBRequest<ProcessedByUrlRecord | undefined>,
   );
   if (proc) {
-    const snapshots = proc.snapshots.filter((s) => s.id !== ledgerRow.snapshotId);
-    if (snapshots.length === 0) {
+    const pruned = removeVerticesIntroducedByLedgerSeq(proc.graph, seq).graph;
+    if (Object.keys(pruned.vertices).length === 0) {
       pStore.delete(ledgerRow.fullUrl);
     } else {
-      pStore.put({ fullUrl: ledgerRow.fullUrl, snapshots });
+      pStore.put({ fullUrl: ledgerRow.fullUrl, graph: pruned });
     }
   }
   lStore.delete(seq);
@@ -429,20 +629,36 @@ function firstLedgerCursorEntry(
   });
 }
 
-/** Delete all three stores + reset memory ledger seq. */
+/** Delete all stores + reset memory ledger seq. */
 export async function clearAllStores(): Promise<void> {
   if (!hasIndexedDb()) {
-    memory.polled.clear();
+    memory.rawHtml.clear();
+    memory.polledMeta.clear();
     memory.processed.clear();
+    memory.siteMetadata.clear();
+    memory.siteRequests.clear();
     memory.ledger.clear();
     memory.nextLedgerSeq = 1;
     return;
   }
   const db = await openDb();
-  const tx = db.transaction([STORE_POLLED, STORE_PROCESSED, STORE_LEDGER], "readwrite");
-  tx.objectStore(STORE_POLLED).clear();
+  const tx = db.transaction(
+    [
+      STORE_RAW_HTML,
+      STORE_POLLED_META,
+      STORE_PROCESSED,
+      STORE_LEDGER,
+      STORE_SITE_METADATA,
+      STORE_SITE_REQUESTS,
+    ],
+    "readwrite",
+  );
+  tx.objectStore(STORE_RAW_HTML).clear();
+  tx.objectStore(STORE_POLLED_META).clear();
   tx.objectStore(STORE_PROCESSED).clear();
   tx.objectStore(STORE_LEDGER).clear();
+  tx.objectStore(STORE_SITE_METADATA).clear();
+  tx.objectStore(STORE_SITE_REQUESTS).clear();
   await txDone(tx);
 }
 
@@ -451,15 +667,48 @@ export async function listProcessedForExport(): Promise<ProcessedByUrlRecord[]> 
   return listAllProcessed();
 }
 
+export async function countLedgerRows(): Promise<number> {
+  if (!hasIndexedDb()) {
+    return memory.ledger.size;
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_LEDGER, "readonly");
+  const count = await reqToPromise(tx.objectStore(STORE_LEDGER).count());
+  await txDone(tx);
+  return count;
+}
+
+export async function listSiteMetadataForExport(): Promise<SiteMetadataRecord[]> {
+  const rows = await listAllSiteMetadata();
+  return rows.sort((a, b) => a.origin.localeCompare(b.origin));
+}
+
+export async function listSiteRequestsForExport(): Promise<SiteRequestLogRecord[]> {
+  const rows = await listAllSiteRequests();
+  return rows.sort((a, b) => a.origin.localeCompare(b.origin));
+}
+
 /** Test helpers — snapshot of in-memory IDB when IndexedDB is unavailable */
 export function memoryStoresSnapshot(): {
   polled: PolledUniqueRecord[];
   processed: ProcessedByUrlRecord[];
+  siteMetadata: SiteMetadataRecord[];
+  siteRequests: SiteRequestLogRecord[];
   ledger: Array<{ seq: number } & LedgerStored>;
 } {
+  const polled: PolledUniqueRecord[] = [];
+  for (const [digest, meta] of memory.polledMeta.entries()) {
+    const raw = memory.rawHtml.get(digest);
+    if (!raw) {
+      continue;
+    }
+    polled.push({ ...meta, rawHtml: raw.rawHtml });
+  }
   return {
-    polled: [...memory.polled.values()],
+    polled,
     processed: [...memory.processed.values()],
+    siteMetadata: [...memory.siteMetadata.values()],
+    siteRequests: [...memory.siteRequests.values()],
     ledger: [...memory.ledger.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([seq, row]) => ({ seq, ...row })),
@@ -467,8 +716,11 @@ export function memoryStoresSnapshot(): {
 }
 
 export function resetMemoryStores(): void {
-  memory.polled.clear();
+  memory.rawHtml.clear();
+  memory.polledMeta.clear();
   memory.processed.clear();
+  memory.siteMetadata.clear();
+  memory.siteRequests.clear();
   memory.ledger.clear();
   memory.nextLedgerSeq = 1;
 }

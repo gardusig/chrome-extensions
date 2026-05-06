@@ -30,11 +30,11 @@ npm run build
 1. Click **Stop** in the popup.
 2. Click **Export**.
 
-Chrome should download a zip named like **`recorder-session-YYYY-MM-DDTHH-mm-ss.zip`** (UTC-based timestamp). Unzip and inspect folders named by host, each containing `.txt` files per URL.
+Chrome should download a zip named like **`recorder-session-YYYY-MM-DDTHH-mm-ss.zip`** (UTC-based timestamp). Unzip and inspect folders named by host, each containing one `.txt` per captured URL: a **merged** outline (tab-indented DFS of the stored graph), not separate snapshot blocks.
 
 ## 5) Clear data
 
-Use **Clear…** → **Trim old** or **Clear all** when stopped to reclaim space (see Options for size targets).
+Use **Clear…** → **Clear old** or **Clear all** when stopped to reclaim space (see Options for the output size limit).
 
 ## Troubleshooting
 

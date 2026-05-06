@@ -1,24 +1,29 @@
 import {
-  appendSnapshotAndLedger,
+  appendSiteRequestLog,
   clearAllStores,
   clearPolledUniqueStore,
-  estimateTrimPlanToTargetBytes,
+  countLedgerRows,
   estimateBytesStore1,
   estimateBytesStores23,
   getPolledUnique,
   listProcessedForExport,
+  listSiteMetadataForExport,
+  listSiteRequestsForExport,
+  mergeTreeIntoGraphAndLedger,
+  mergeSiteMetadataLines,
+  originFromUrl,
   trimStores23ToTargetBytes,
   tryPutPolledUnique,
 } from "./lib/db";
 import * as digestQueue from "./lib/digest-queue";
+import { compressTextTree, htmlToTextTree } from "./lib/html-text-tree";
 import { extractHeadMeta, type HeadMeta } from "./lib/head-meta";
 import { redactUrl } from "./lib/redact";
-import { buildSnapshotBlockText, type RequestSummary } from "./lib/snapshot-block";
+import { buildSiteMetadataLines, type RequestSummary } from "./lib/snapshot-block";
 import { sha256Hex } from "./lib/sha256";
 import { buildExportZipBytes, exportZipBasename } from "./lib/recorder-export";
 import {
   STORAGE_KEYS,
-  type ClearSuggestion,
   type ExportMessage,
   type RecorderSettings,
   type RecorderState,
@@ -45,6 +50,8 @@ type RecorderRecordingBroadcastMessage = {
 type PendingRequestRecord = {
   requestId: string;
   tabId: number;
+  pageOrigin: string;
+  pageUrl?: string;
   method: string;
   url: string;
   requestPayloadBytes?: number | null;
@@ -73,24 +80,17 @@ const DEFAULT_STATE: RecorderState = {
 const DEFAULT_SETTINGS: RecorderSettings = {
   pollIntervalMs: 500,
   limitForceStopMb: 32,
-  targetAfterCleanupMb: 16,
 };
 
 let recorderState: RecorderState = { ...DEFAULT_STATE };
 let recorderSettings: RecorderSettings = { ...DEFAULT_SETTINGS };
-const RECENT_REQUESTS_PER_TAB_LIMIT = 300;
-const REQUESTS_PER_SNAPSHOT_LIMIT = 100;
 const REQUESTS_URL_FILTER = { urls: ["<all_urls>"] };
 const pendingRequestsById = new Map<string, PendingRequestRecord>();
-const pendingRequestsByTab = new Map<number, RequestSummary[]>();
 
 function normalizeSettings(s: RecorderSettings | undefined): RecorderSettings {
   return {
-    ...DEFAULT_SETTINGS,
-    ...s,
     pollIntervalMs: Math.min(Math.max(Math.round(s?.pollIntervalMs ?? 500), 100), 5000),
     limitForceStopMb: Math.min(Math.max(s?.limitForceStopMb ?? 32, 8), 2048),
-    targetAfterCleanupMb: Math.min(Math.max(s?.targetAfterCleanupMb ?? 16, 4), 1024),
   };
 }
 
@@ -156,25 +156,21 @@ function isCapturableTabUrl(url?: string): boolean {
   return url.startsWith("http://") || url.startsWith("https://");
 }
 
-function trimAndPushRequest(tabId: number, request: RequestSummary): void {
-  const queue = pendingRequestsByTab.get(tabId) ?? [];
-  queue.push(request);
-  while (queue.length > RECENT_REQUESTS_PER_TAB_LIMIT) {
-    queue.shift();
+function requestOriginFromDetails(
+  details:
+    | chrome.webRequest.OnBeforeRequestDetails
+    | chrome.webRequest.OnCompletedDetails
+    | chrome.webRequest.OnErrorOccurredDetails,
+): string {
+  if ("initiator" in details && details.initiator) {
+    return originFromUrl(details.initiator);
   }
-  pendingRequestsByTab.set(tabId, queue);
-}
-
-function consumePendingRequestsForTab(tabId: number): RequestSummary[] | undefined {
-  const queue = pendingRequestsByTab.get(tabId);
-  if (!queue || queue.length === 0) {
-    return undefined;
+  if ("documentUrl" in details && details.documentUrl) {
+    return originFromUrl(
+      typeof details.documentUrl === "string" ? details.documentUrl : details.url,
+    );
   }
-  pendingRequestsByTab.set(tabId, []);
-  if (queue.length <= REQUESTS_PER_SNAPSHOT_LIMIT) {
-    return queue;
-  }
-  return queue.slice(queue.length - REQUESTS_PER_SNAPSHOT_LIMIT);
+  return originFromUrl(details.url);
 }
 
 function extractRequestBodyBytes(details: chrome.webRequest.OnBeforeRequestDetails): number | null {
@@ -237,6 +233,11 @@ function onBeforeRequest(
   pendingRequestsById.set(details.requestId, {
     requestId: details.requestId,
     tabId: details.tabId,
+    pageOrigin: requestOriginFromDetails(details),
+    pageUrl:
+      "documentUrl" in details && typeof details.documentUrl === "string"
+        ? redactUrl(details.documentUrl)
+        : undefined,
     method: details.method ?? "GET",
     url: redactUrl(details.url),
     requestPayloadBytes: extractRequestBodyBytes(details),
@@ -258,7 +259,33 @@ function onCompleted(details: chrome.webRequest.OnCompletedDetails): void {
     responseBytes: responseBytesFromHeaders(details.responseHeaders),
     responseContentType: contentTypeFromHeaders(details.responseHeaders),
   };
-  trimAndPushRequest(details.tabId, request);
+  const origin = pending?.pageOrigin ?? requestOriginFromDetails(details);
+  void appendSiteRequestLog(origin, {
+    at: new Date().toISOString(),
+    pageUrl: pending?.pageUrl,
+    ...request,
+  });
+  pendingRequestsById.delete(details.requestId);
+}
+
+function onErrorOccurred(details: chrome.webRequest.OnErrorOccurredDetails): void {
+  if (!recorderState.isRecording || details.tabId < 0) {
+    return;
+  }
+  const pending = pendingRequestsById.get(details.requestId);
+  const request: RequestSummary = {
+    url: redactUrl(details.url),
+    method: pending?.method ?? details.method ?? "GET",
+    requestPayloadBytes: pending?.requestPayloadBytes,
+    requestContentType: pending?.requestContentType,
+    error: details.error,
+  };
+  const origin = pending?.pageOrigin ?? requestOriginFromDetails(details);
+  void appendSiteRequestLog(origin, {
+    at: new Date().toISOString(),
+    pageUrl: pending?.pageUrl,
+    ...request,
+  });
   pendingRequestsById.delete(details.requestId);
 }
 
@@ -277,8 +304,12 @@ async function refreshStorageEstimates(): Promise<void> {
 }
 
 async function buildExportZip(): Promise<Uint8Array> {
-  const rows = await listProcessedForExport();
-  return buildExportZipBytes(rows);
+  const [rows, siteMetadataRows, siteRequestRows] = await Promise.all([
+    listProcessedForExport(),
+    listSiteMetadataForExport(),
+    listSiteRequestsForExport(),
+  ]);
+  return buildExportZipBytes(rows, siteMetadataRows, siteRequestRows);
 }
 
 async function processDigest(digest: string): Promise<void> {
@@ -286,19 +317,19 @@ async function processDigest(digest: string): Promise<void> {
   if (!row) {
     return;
   }
+  const tree = compressTextTree(htmlToTextTree(row.rawHtml));
   const headMeta = row.headMeta ?? extractHeadMeta(row.rawHtml);
-  const text = buildSnapshotBlockText({
-    fullUrl: row.fullUrl,
-    capturedAt: row.capturedAt,
-    tabId: row.tabId,
-    windowId: row.windowId,
-    title: row.title,
-    headMeta,
-    rawHtml: row.rawHtml,
-    requests: consumePendingRequestsForTab(row.tabId),
-  });
+  await mergeSiteMetadataLines(
+    originFromUrl(row.fullUrl),
+    buildSiteMetadataLines({
+      fullUrl: row.fullUrl,
+      headMeta,
+      rawHtml: row.rawHtml,
+      title: row.title,
+    }),
+  );
   const snapshotId = crypto.randomUUID();
-  await appendSnapshotAndLedger(row.fullUrl, snapshotId, text);
+  await mergeTreeIntoGraphAndLedger(row.fullUrl, snapshotId, tree);
 }
 
 async function drainWorker(): Promise<void> {
@@ -378,7 +409,7 @@ async function startRecordingSession(): Promise<void> {
   if (shouldBlockRecordingStart(recorderState.storageBytesProcessed)) {
     recorderState.recordingBlockedForLimit = true;
     await persistState();
-    throw new Error("Clear old snapshots before starting: output+ledger is above limit.");
+    throw new Error("Clear old output before starting: output+ledger is above limit.");
   }
   const sessionId = crypto.randomUUID();
   recorderState = {
@@ -405,7 +436,6 @@ async function stopRecordingSession(forceLimit = false): Promise<void> {
   await drainWorker();
   digestQueue.clearDigestQueue();
   pendingRequestsById.clear();
-  pendingRequestsByTab.clear();
   await clearPolledUniqueStore();
   await refreshStorageEstimates();
   await persistState();
@@ -413,10 +443,7 @@ async function stopRecordingSession(forceLimit = false): Promise<void> {
 
 async function sessionStats(): Promise<SessionStats> {
   const rows = await listProcessedForExport();
-  let snapshotCount = 0;
-  for (const r of rows) {
-    snapshotCount += r.snapshots.length;
-  }
+  const snapshotCount = await countLedgerRows();
   const raw = await estimateBytesStore1();
   const proc = await estimateBytesStores23();
   return {
@@ -426,54 +453,6 @@ async function sessionStats(): Promise<SessionStats> {
     storageBytesProcessed: proc,
     storageBytesTotal: raw + proc,
   };
-}
-
-async function clearSuggestions(): Promise<ClearSuggestion[]> {
-  const current = await estimateBytesStores23();
-  if (current <= 0) {
-    return [];
-  }
-  const limit = limitBytes();
-  const candidateTargets = [
-    { id: "under-limit", label: "Trim enough to go under limit", target: Math.max(0, limit - 1) },
-    {
-      id: "free-8mb",
-      label: "Free about 8 MB (oldest first)",
-      target: Math.max(0, current - 8 * 1024 * 1024),
-    },
-    {
-      id: "free-16mb",
-      label: "Free about 16 MB (oldest first)",
-      target: Math.max(0, current - 16 * 1024 * 1024),
-    },
-    {
-      id: "target-after-cleanup",
-      label: "Trim to configured target",
-      target: recorderSettings.targetAfterCleanupMb * 1024 * 1024,
-    },
-  ];
-
-  const seenTargets = new Set<number>();
-  const suggestions: ClearSuggestion[] = [];
-  for (const candidate of candidateTargets) {
-    if (candidate.target >= current || seenTargets.has(candidate.target)) {
-      continue;
-    }
-    seenTargets.add(candidate.target);
-    const plan = await estimateTrimPlanToTargetBytes(candidate.target);
-    if (plan.snapshotsToRemove <= 0 || plan.estimatedBytesFreed <= 0) {
-      continue;
-    }
-    suggestions.push({
-      id: candidate.id,
-      label: candidate.label,
-      targetBytes: candidate.target,
-      snapshotsToRemove: plan.snapshotsToRemove,
-      estimatedBytesFreed: plan.estimatedBytesFreed,
-      projectedBytesAfter: plan.projectedBytesAfter,
-    });
-  }
-  return suggestions;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -488,6 +467,7 @@ chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest, REQUESTS_URL_FILT
   "requestBody",
 ]);
 chrome.webRequest.onCompleted.addListener(onCompleted, REQUESTS_URL_FILTER, ["responseHeaders"]);
+chrome.webRequest.onErrorOccurred?.addListener(onErrorOccurred, REQUESTS_URL_FILTER);
 
 chrome.runtime.onMessage.addListener(
   (
@@ -569,27 +549,10 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ ok: false, error: "Stop recording before clear." });
             return;
           }
-          const targetBytes = recorderSettings.targetAfterCleanupMb * 1024 * 1024;
-          await trimStores23ToTargetBytes(targetBytes);
-          await refreshStorageEstimates();
-          sendResponse({ ok: true });
-          return;
-        }
-        if (message.type === "GET_CLEAR_SUGGESTIONS") {
-          if (recorderState.isRecording) {
-            sendResponse({ ok: false, error: "Stop recording before clear." });
-            return;
+          const current = await estimateBytesStores23();
+          if (current > 0) {
+            await trimStores23ToTargetBytes(Math.floor(current / 2));
           }
-          sendResponse({ ok: true, suggestions: await clearSuggestions() });
-          return;
-        }
-        if (message.type === "CLEAR_TRIM_TO_TARGET") {
-          if (recorderState.isRecording) {
-            sendResponse({ ok: false, error: "Stop recording before clear." });
-            return;
-          }
-          const targetBytes = Math.max(0, message.payload?.targetBytes ?? 0);
-          await trimStores23ToTargetBytes(targetBytes);
           await refreshStorageEstimates();
           sendResponse({ ok: true });
           return;

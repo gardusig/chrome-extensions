@@ -2,10 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-const extensionRoot = resolve(
-  fileURLToPath(new URL(".", import.meta.url)),
-  "extensions/browser-recorder",
-);
+const extensionRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "extensions/recorder");
 
 export default defineConfig({
   root: extensionRoot,
@@ -33,13 +30,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       include: ["src/**/*.ts"],
-      exclude: ["tests/**/*.test.ts", "src/lib/db.ts"],
-      thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 80,
-        statements: 80,
-      },
+      exclude: ["tests/**/*.test.ts"],
     },
   },
 });

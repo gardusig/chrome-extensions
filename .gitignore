@@ -1,13 +1,13 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.js
 
 # testing
 /coverage
-/extensions/browser-recorder/coverage
+/extensions/recorder/coverage
 
 # next.js
 /.next/
@@ -16,12 +16,7 @@
 # production
 /build
 /dist
-/extensions/browser-recorder/dist
-/extensions/browser-recorder/recordings/*
-!/extensions/browser-recorder/recordings/.gitkeep
-/extensions/browser-recorder/recordings/**/*.json
-/extensions/browser-recorder/recordings/**/*.jsonl
-/extensions/browser-recorder/recordings/**/*.txt
+/extensions/recorder/dist
 
 # misc
 .DS_Store

@@ -4,7 +4,7 @@
   "description": "Workspace for Chrome extensions (MV3).",
   "private": true,
   "scripts": {
-    "build": "vite build && cp extensions/browser-recorder/manifest.json extensions/browser-recorder/dist/manifest.json",
+    "build": "vite build && cp extensions/recorder/manifest.json extensions/recorder/dist/manifest.json",
     "setup:browser": "npm run build && node scripts/setup-browser.mjs",
     "dev": "vite build --watch",
     "test": "vitest run",
@@ -15,7 +15,7 @@
     "format:local": "prettier . --write && eslint . --fix",
     "format:check": "prettier . --check",
     "typecheck": "tsc --noEmit",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build"
   },
   "repository": {
     "type": "git",

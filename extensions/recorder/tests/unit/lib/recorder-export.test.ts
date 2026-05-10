@@ -33,9 +33,37 @@ describe("recorder-export paths", () => {
       },
     ]);
     expect(entries).toHaveLength(1);
-    expect(entries[0].filename.startsWith("example-com/")).toBe(true);
+    expect(entries[0].filename).toBe("recorder/content/example-com.txt");
     expect(entries[0].content).toContain("a");
-    expect(entries[0].content).toContain("\tb");
+    expect(entries[0].content).toContain("b");
+  });
+
+  it("merges content per host and dedupes lines", () => {
+    const entries = buildZipEntriesFromProcessed([
+      {
+        fullUrl: "https://github.com/gardusig?tab=repositories",
+        graph: {
+          vertices: {
+            a: { depth: 0, text: "Same line", introducedLedgerSeq: 1 },
+          },
+          childrenByParent: { __root__: ["a"] },
+        },
+      },
+      {
+        fullUrl: "https://github.com/gardusig?tab=stars",
+        graph: {
+          vertices: {
+            a: { depth: 0, text: "Same line", introducedLedgerSeq: 2 },
+            b: { depth: 0, text: "Another line", introducedLedgerSeq: 2 },
+          },
+          childrenByParent: { __root__: ["a", "b"] },
+        },
+      },
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].filename).toBe("recorder/content/github-com.txt");
+    expect(entries[0].content).toBe("Another line\nSame line");
   });
 
   it("builds sidecar metadata and request files per site", () => {
@@ -50,9 +78,9 @@ describe("recorder-export paths", () => {
         ],
       },
     ]);
-    expect(metadata[0].filename).toBe("www-linkedin-com/site-metadata.txt");
+    expect(metadata[0].filename).toBe("recorder/metadata/www-linkedin-com.txt");
     expect(metadata[0].content).toContain("title: Feed");
-    expect(requests[0].filename).toBe("www-linkedin-com/site-requests.jsonl");
+    expect(requests[0].filename).toBe("recorder/requests/www-linkedin-com.jsonl");
     expect(requests[0].content).toContain('"method":"GET"');
   });
 });

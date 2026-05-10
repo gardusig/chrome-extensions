@@ -11,7 +11,17 @@ async function flushMicrotasks(): Promise<void> {
 
 function mountPopupDom(): void {
   document.body.innerHTML = `
-    <div id="status"></div>
+    <div id="status">
+      <div id="status-badge"><span id="status-label"></span></div>
+      <div id="status-detail"></div>
+      <table>
+        <tbody>
+          <tr><td id="metric-raw"></td></tr>
+          <tr><td id="metric-output"></td></tr>
+          <tr><td id="metric-total"></td></tr>
+        </tbody>
+      </table>
+    </div>
     <div id="stats"></div>
     <div id="message"></div>
     <button id="start-btn" type="button">Start</button>
@@ -93,6 +103,10 @@ describe("popup", () => {
 
     expect((document.querySelector("#export-btn") as HTMLButtonElement).disabled).toBe(true);
     expect((document.querySelector("#clear-btn") as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      document.querySelector("#status-badge")?.classList.contains("status-badge--recording"),
+    ).toBe(true);
+    expect(document.querySelector("#status-label")?.textContent).toBe("Recording");
   });
 
   it("sends STOP_RECORDING when stop is clicked", async () => {

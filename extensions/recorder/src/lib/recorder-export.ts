@@ -37,12 +37,29 @@ export function buildZipEntriesFromProcessed(rows: ProcessedByUrlRecord[]): Arra
   filename: string;
   content: string;
 }> {
-  return rows.map((row) => {
-    const folder = siteFolderFromUrl(row.fullUrl);
-    const slug = slugFromUrl(row.fullUrl);
-    const body = graphToDFSIndentedText(row.graph);
-    return { filename: `${folder}/${slug}.txt`, content: body };
-  });
+  const linesBySite = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const site = siteFolderFromUrl(row.fullUrl);
+    const output = graphToDFSIndentedText(row.graph);
+    if (!linesBySite.has(site)) {
+      linesBySite.set(site, new Set<string>());
+    }
+    const set = linesBySite.get(site)!;
+    for (const line of output.split("\n")) {
+      const normalized = line.trim();
+      if (!normalized) {
+        continue;
+      }
+      set.add(normalized);
+    }
+  }
+
+  return [...linesBySite.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([site, lines]) => ({
+      filename: `recorder/content/${site}.txt`,
+      content: [...lines].sort().join("\n"),
+    }));
 }
 
 function folderFromOrigin(origin: string): string {
@@ -57,20 +74,26 @@ export function buildZipEntriesFromSiteMetadata(rows: SiteMetadataRecord[]): Arr
   filename: string;
   content: string;
 }> {
-  return rows.map((row) => ({
-    filename: `${folderFromOrigin(row.origin)}/site-metadata.txt`,
-    content: row.lines.join("\n"),
-  }));
+  return rows
+    .slice()
+    .sort((a, b) => a.origin.localeCompare(b.origin))
+    .map((row) => ({
+      filename: `recorder/metadata/${folderFromOrigin(row.origin)}.txt`,
+      content: row.lines.join("\n"),
+    }));
 }
 
 export function buildZipEntriesFromSiteRequests(rows: SiteRequestLogRecord[]): Array<{
   filename: string;
   content: string;
 }> {
-  return rows.map((row) => ({
-    filename: `${folderFromOrigin(row.origin)}/site-requests.jsonl`,
-    content: row.entries.map((entry) => JSON.stringify(entry)).join("\n"),
-  }));
+  return rows
+    .slice()
+    .sort((a, b) => a.origin.localeCompare(b.origin))
+    .map((row) => ({
+      filename: `recorder/requests/${folderFromOrigin(row.origin)}.jsonl`,
+      content: row.entries.map((entry) => JSON.stringify(entry)).join("\n"),
+    }));
 }
 
 export function buildExportZipBytes(

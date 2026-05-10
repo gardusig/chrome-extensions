@@ -6,6 +6,8 @@ export type TextTreeNode = {
 };
 
 const IGNORE_SUBTREES = new Set(["script", "style", "noscript", "template", "head", "svg"]);
+const FALLBACK_REMOVE_TAGS = "script,style,noscript,template,svg,head";
+const FALLBACK_MAX_CHARS = 20_000;
 
 function normalizeInlineText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -124,6 +126,43 @@ export function compressTextTree(root: TextTreeNode): TextTreeNode {
     .filter((child): child is TextTreeNode => child !== null);
   const text = normalizeMultilineText(root.text);
   return { ...root, text, children };
+}
+
+function treeHasContent(root: TextTreeNode): boolean {
+  return normalizeMultilineText(root.text).length > 0 || root.children.length > 0;
+}
+
+function fallbackTextTreeFromBody(rawHtml: string): TextTreeNode | null {
+  try {
+    const doc = new DOMParser().parseFromString(rawHtml, "text/html");
+    for (const node of Array.from(doc.querySelectorAll(FALLBACK_REMOVE_TAGS))) {
+      node.remove();
+    }
+    const root = doc.body ?? doc.documentElement;
+    const text = normalizeMultilineText((root?.textContent ?? "").slice(0, FALLBACK_MAX_CHARS));
+    if (!text) {
+      return null;
+    }
+    return {
+      text: "",
+      tag: "root",
+      children: [{ text, tag: "fallback-text", children: [] }],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build the capture tree used by the recorder pipeline.
+ * Falls back to sanitized body text when structured extraction is empty.
+ */
+export function buildCaptureTextTree(rawHtml: string): TextTreeNode {
+  const primary = compressTextTree(htmlToTextTree(rawHtml));
+  if (treeHasContent(primary)) {
+    return primary;
+  }
+  return fallbackTextTreeFromBody(rawHtml) ?? primary;
 }
 
 function pushLine(lines: string[], depth: number, text: string): void {

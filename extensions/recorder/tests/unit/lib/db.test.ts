@@ -8,6 +8,7 @@ import {
   estimateTrimPlanToTargetBytes,
   estimateBytesStores23,
   listSiteMetadataForExport,
+  listSiteRequestsForExport,
   mergeSiteMetadataLines,
   memoryStoresSnapshot,
   resetMemoryStores,
@@ -150,6 +151,15 @@ describe("db memory fallback", () => {
     ]);
   });
 
+  it("keeps metadata rows isolated per origin", async () => {
+    await mergeSiteMetadataLines("https://a.test", ["title: A", "title: A"]);
+    await mergeSiteMetadataLines("https://b.test", ["title: B"]);
+    const rows = await listSiteMetadataForExport();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ origin: "https://a.test", lines: ["title: A"] });
+    expect(rows[1]).toEqual({ origin: "https://b.test", lines: ["title: B"] });
+  });
+
   it("caps request logs per origin", async () => {
     await appendSiteRequestLog(
       "https://www.linkedin.com",
@@ -171,5 +181,33 @@ describe("db memory fallback", () => {
     expect(snapshot.siteRequests[0].entries).toHaveLength(2);
     expect(snapshot.siteRequests[0].entries[0].url).toContain("/b");
     expect(snapshot.siteRequests[0].entries[1].url).toContain("/c");
+  });
+
+  it("stores request logs as ordered lists and keeps origins isolated", async () => {
+    await appendSiteRequestLog("https://a.test", {
+      at: "2026-05-05T12:00:00.000Z",
+      url: "https://a.test/1",
+      method: "GET",
+    });
+    await appendSiteRequestLog("https://a.test", {
+      at: "2026-05-05T12:01:00.000Z",
+      url: "https://a.test/2",
+      method: "POST",
+    });
+    await appendSiteRequestLog("https://b.test", {
+      at: "2026-05-05T12:02:00.000Z",
+      url: "https://b.test/1",
+      method: "GET",
+    });
+
+    const rows = await listSiteRequestsForExport();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].origin).toBe("https://a.test");
+    expect(rows[0].entries.map((entry) => entry.url)).toEqual([
+      "https://a.test/1",
+      "https://a.test/2",
+    ]);
+    expect(rows[1].origin).toBe("https://b.test");
+    expect(rows[1].entries.map((entry) => entry.url)).toEqual(["https://b.test/1"]);
   });
 });

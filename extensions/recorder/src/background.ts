@@ -16,7 +16,7 @@ import {
   tryPutPolledUnique,
 } from "./lib/db";
 import * as digestQueue from "./lib/digest-queue";
-import { compressTextTree, htmlToTextTree } from "./lib/html-text-tree";
+import { buildCaptureTextTree } from "./lib/html-text-tree";
 import { extractHeadMeta, type HeadMeta } from "./lib/head-meta";
 import { redactUrl } from "./lib/redact";
 import { buildSiteMetadataLines, type RequestSummary } from "./lib/snapshot-block";
@@ -317,7 +317,7 @@ async function processDigest(digest: string): Promise<void> {
   if (!row) {
     return;
   }
-  const tree = compressTextTree(htmlToTextTree(row.rawHtml));
+  const tree = buildCaptureTextTree(row.rawHtml);
   const headMeta = row.headMeta ?? extractHeadMeta(row.rawHtml);
   await mergeSiteMetadataLines(
     originFromUrl(row.fullUrl),

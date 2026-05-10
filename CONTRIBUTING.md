@@ -47,7 +47,7 @@ npm run check
 1. Create a sibling folder under `extensions/<your-extension-name>/` (same level as `recorder`).
 2. Add its own `manifest.json`, entry HTML/TS, and `README.md`.
 3. Extend the root [Vite config](vite.config.ts) (or introduce a separate build entry) so `npm run build` produces a loadable `dist/` for that extension.
-4. Document it in the root [README.md](README.md) table and, if you add product docs, a short entry in [docs/README.md](docs/README.md).
+4. Document it in the root [README.md](README.md#documentation) table and add product docs under [`docs/`](docs/).
 
 ## Pull requests
 

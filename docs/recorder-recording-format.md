@@ -2,7 +2,7 @@
 
 Recorder persists capture data in **IndexedDB** while recording and, when you click **Export**, downloads a single zip into Chrome’s **Downloads** folder.
 
-There is **no** session-level `metadata.json` at the zip root for the primary workflow—value lives in **per-page `.txt`** files.
+There is **no** session-level `metadata.json` at the zip root for the primary workflow—value lives in per-site text/jsonl files.
 
 ## Downloaded zip filename
 
@@ -16,31 +16,32 @@ Example: `recorder-session-2026-05-05T14-30-00.zip`.
 
 ## Inner layout
 
-One folder per **site bucket** (hostname with `.` → `-`), each containing one `.txt` per captured URL slug:
+The archive now uses a stable `recorder/` prefix with one file per site bucket (hostname with `.` → `-`) in each logical section:
 
 ```text
 recorder-session-2026-05-05T14-30-00.zip
-├── www-example-com/
-│   └── www-example-com-docs-page.txt
-└── app-example-com/
-    └── app-example-com-dashboard-index.txt
+└── recorder/
+    ├── requests/
+    │   └── www-example-com.jsonl
+    ├── metadata/
+    │   └── www-example-com.txt
+    └── content/
+        └── www-example-com.txt
 ```
 
-Each `.txt` contains one **merged DFS outline** for that URL:
+Semantics:
 
-- The recorder converts each captured HTML into a normalized tree.
-- New polls only add vertices/edges that are not already in the URL graph.
-- Export walks the graph with DFS and writes lines with **tab indentation by node depth**.
+- `requests/{site}.jsonl`: ordered request list (one JSON object per line).
+- `metadata/{site}.txt`: deduped metadata lines for the site.
+- `content/{site}.txt`: deduped readable text lines merged from all URLs under that site.
 
-## Page text format
+## Content text format
 
-The page file is plain text. Each line is one merged vertex text value:
+The content file is plain text and line-oriented:
 
-- Depth 0: no leading tabs.
-- Depth 1: one leading tab.
-- Depth N: `N` leading tabs.
-
-If a vertex text has multiple lines, each emitted line gets the same depth indentation.
+- Each line is a unique, non-empty readable text segment derived from the merged graph.
+- Lines are deduped and sorted at export time.
+- Because export normalizes per-line values, depth indentation is not preserved in this output.
 
 ## IndexedDB model (summary)
 

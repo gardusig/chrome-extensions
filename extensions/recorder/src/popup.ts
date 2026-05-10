@@ -7,6 +7,12 @@ type BackgroundResponse<T = unknown> = {
 } & T;
 
 const statusEl = document.querySelector<HTMLDivElement>("#status");
+const statusBadgeEl = document.querySelector<HTMLDivElement>("#status-badge");
+const statusLabelEl = document.querySelector<HTMLSpanElement>("#status-label");
+const statusDetailEl = document.querySelector<HTMLDivElement>("#status-detail");
+const metricRawEl = document.querySelector<HTMLTableCellElement>("#metric-raw");
+const metricOutputEl = document.querySelector<HTMLTableCellElement>("#metric-output");
+const metricTotalEl = document.querySelector<HTMLTableCellElement>("#metric-total");
 const statsEl = document.querySelector<HTMLDivElement>("#stats");
 const messageEl = document.querySelector<HTMLDivElement>("#message");
 const startBtn = document.querySelector<HTMLButtonElement>("#start-btn");
@@ -26,6 +32,12 @@ let isBusy = false;
 function assertElements(): void {
   if (
     !statusEl ||
+    !statusBadgeEl ||
+    !statusLabelEl ||
+    !statusDetailEl ||
+    !metricRawEl ||
+    !metricOutputEl ||
+    !metricTotalEl ||
     !statsEl ||
     !messageEl ||
     !startBtn ||
@@ -52,10 +64,22 @@ function renderState(state: RecorderState): void {
   const rawMb = (state.storageBytesRaw / (1024 * 1024)).toFixed(2);
   const procMb = (state.storageBytesProcessed / (1024 * 1024)).toFixed(2);
   const totalMb = (state.storageBytesTotal / (1024 * 1024)).toFixed(2);
-  const statusText = state.isRecording
-    ? `Recording${state.sessionId ? ` (${state.sessionId.slice(0, 8)}…)` : ""}`
-    : `Stopped${state.forceStoppedForLimit ? " — storage limit reached" : ""}`;
-  statusEl!.textContent = `${statusText}\nRaw ${rawMb} MB\nOutput ${procMb} MB\nTotal ${totalMb} MB`;
+  statusBadgeEl!.classList.toggle("status-badge--recording", state.isRecording);
+  statusLabelEl!.textContent = state.isRecording ? "Recording" : "Stopped";
+  metricRawEl!.textContent = `${rawMb} MB`;
+  metricOutputEl!.textContent = `${procMb} MB`;
+  metricTotalEl!.textContent = `${totalMb} MB`;
+
+  const details: string[] = [];
+  if (state.isRecording && state.sessionId) {
+    details.push(`Session ${state.sessionId.slice(0, 8)}…`);
+  }
+  if (state.forceStoppedForLimit) {
+    details.push("Storage limit reached");
+  }
+  statusDetailEl!.textContent = details.join(" — ");
+  statusDetailEl!.hidden = details.length === 0;
+
   const settingsLimitBytes = (latestSettings?.limitForceStopMb ?? 32) * 1024 * 1024;
   const blockedByLimit =
     state.recordingBlockedForLimit ||

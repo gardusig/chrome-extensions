@@ -28,7 +28,53 @@
         padding: 8px;
         border-radius: 8px;
         background: rgba(125, 125, 125, 0.15);
-        white-space: pre-line;
+      }
+      .status-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .status-metrics {
+        flex: 1 1 auto;
+      }
+      .metrics-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .metrics-table td {
+        padding: 1px 0;
+      }
+      .metric-label {
+        opacity: 0.9;
+      }
+      .metric-value {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(125, 125, 125, 0.45);
+        background: rgba(50, 50, 50, 0.15);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #3a3f46;
+      }
+      .status-badge--recording .status-dot {
+        background: #c7362d;
+      }
+      .status-detail {
+        margin-top: 6px;
+        opacity: 0.85;
       }
       .stats {
         font-size: 12px;
@@ -96,7 +142,33 @@
   <body>
     <div class="container">
       <h3>Recorder</h3>
-      <div id="status" class="status">Loading...</div>
+      <div id="status" class="status">
+        <div class="status-row">
+          <div class="status-metrics">
+            <table class="metrics-table" aria-label="Recorder storage metrics">
+              <tbody>
+                <tr>
+                  <td class="metric-label">Raw</td>
+                  <td id="metric-raw" class="metric-value">0.00 MB</td>
+                </tr>
+                <tr>
+                  <td class="metric-label">Output</td>
+                  <td id="metric-output" class="metric-value">0.00 MB</td>
+                </tr>
+                <tr>
+                  <td class="metric-label">Total</td>
+                  <td id="metric-total" class="metric-value">0.00 MB</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="status-badge" class="status-badge">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="status-label">Loading...</span>
+          </div>
+        </div>
+        <div id="status-detail" class="status-detail" hidden></div>
+      </div>
       <div id="stats" class="stats">Ingests: 0 | URLs: 0</div>
       <div class="controls">
         <button id="start-btn" class="btn-start" type="button">Start</button>

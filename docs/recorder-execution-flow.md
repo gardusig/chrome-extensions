@@ -71,3 +71,4 @@ While recording, if estimated **output** size exceeds **limitForceStopMb** (same
 - System design (components, metrics, diagrams): **[recorder-system-design.md](recorder-system-design.md)**.
 - Export layout: **[recorder-recording-format.md](recorder-recording-format.md)**.
 - Local verification: **[recorder-install-verify.md](recorder-install-verify.md)**.
+- Debug workflow (service worker + IndexedDB): **[recorder-debug.md](recorder-debug.md)**.

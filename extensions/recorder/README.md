@@ -19,7 +19,7 @@ All docs live in the repo **`docs/`** folder (not here):
 | Merged graph schema             | [docs/recorder-merged-graph-schema.md](../../docs/recorder-merged-graph-schema.md) |
 | Pipeline behavior               | [docs/recorder-execution-flow.md](../../docs/recorder-execution-flow.md)           |
 | Smoke test                      | [docs/recorder-install-verify.md](../../docs/recorder-install-verify.md)           |
-| Doc index                       | [docs/README.md](../../docs/README.md)                                             |
+| Doc index                       | [README.md#documentation](../../README.md#documentation)                           |
 
 ## Requirements
 

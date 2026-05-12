@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as digestQueue from "../../src/lib/digest-queue";
 import {
+  deletePolledStagingByDigest,
   getPolledUnique,
   memoryStoresSnapshot,
   mergeSiteMetadataLines,
@@ -72,6 +73,7 @@ async function drainQueueLikeWorker(): Promise<void> {
     );
     snapshotSeq += 1;
     await mergeTreeIntoGraphAndLedger(row.fullUrl, `snapshot-${snapshotSeq}`, tree);
+    await deletePolledStagingByDigest(digest);
   }
 }
 
@@ -123,9 +125,8 @@ describe("capture raw HTML worker pipeline", () => {
     });
     await drainQueueLikeWorker();
 
-    const row = await getPolledUnique(digest);
-    expect(row).not.toBeNull();
-    const treeText = treeToIndentedText(buildCaptureTextTree(row!.rawHtml)).trim();
+    expect(await getPolledUnique(digest)).toBeNull();
+    const treeText = treeToIndentedText(buildCaptureTextTree(rawHtml)).trim();
     expect(treeText).toContain("Feed post");
     expect(treeText).toContain("Alex Morgan");
     expect(treeText).toContain("practical AI workflows");

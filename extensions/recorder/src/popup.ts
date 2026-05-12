@@ -92,7 +92,7 @@ function renderState(state: RecorderState): void {
 }
 
 function renderStats(stats: SessionStats): void {
-  statsEl!.textContent = `Ingests: ${stats.snapshotCount} | URLs: ${stats.urlCount} · Output ${(
+  statsEl!.textContent = `Ingests: ${stats.snapshotCount} | URLs: ${stats.urlCount} · Queue ${stats.digestQueueLength} · Output ${(
     stats.storageBytesProcessed /
     (1024 * 1024)
   ).toFixed(2)} MB`;

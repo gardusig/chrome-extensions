@@ -42,7 +42,7 @@ describe("background start gating", () => {
 
   it("rejects START_RECORDING when processed output is above limit", async () => {
     const chromeMock = createChromeMock({
-      "recorder:settings": { pollIntervalMs: 500, limitForceStopMb: 32 },
+      "recorder:settings": { pollIntervalMs: 500, limitForceStopMb: 32, rawLimitMb: 100 },
     });
     vi.stubGlobal("chrome", chromeMock);
 

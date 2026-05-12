@@ -3,8 +3,10 @@ import {
   clearAllStores,
   clearPolledUniqueStore,
   countLedgerRows,
+  deletePolledStagingByDigest,
   estimateBytesStore1,
   estimateBytesStores23,
+  evictRawUntilUnderBudget,
   getPolledUnique,
   listProcessedForExport,
   listSiteMetadataForExport,
@@ -80,6 +82,7 @@ const DEFAULT_STATE: RecorderState = {
 const DEFAULT_SETTINGS: RecorderSettings = {
   pollIntervalMs: 500,
   limitForceStopMb: 32,
+  rawLimitMb: 100,
 };
 
 let recorderState: RecorderState = { ...DEFAULT_STATE };
@@ -87,10 +90,56 @@ let recorderSettings: RecorderSettings = { ...DEFAULT_SETTINGS };
 const REQUESTS_URL_FILTER = { urls: ["<all_urls>"] };
 const pendingRequestsById = new Map<string, PendingRequestRecord>();
 
+/** Serialize capture ingest + drain with output of concurrent tab captures. */
+let captureMutexChain: Promise<void> = Promise.resolve();
+
+function runCaptureSerialized<T>(fn: () => Promise<T>): Promise<T> {
+  const next = captureMutexChain.then(fn);
+  captureMutexChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
+async function waitCapturePipelineIdle(): Promise<void> {
+  await captureMutexChain;
+}
+
+/** At most one coalesced drain runs; the loop picks up digests pushed while draining. */
+let activeDrain: Promise<void> | null = null;
+
+async function drainDigestQueueLoop(): Promise<void> {
+  while (digestQueue.digestQueueLength() > 0) {
+    const digest = digestQueue.popDigest();
+    if (!digest) {
+      break;
+    }
+    await processDigest(digest);
+  }
+}
+
+function ensureDrainRunning(): Promise<void> {
+  if (activeDrain) {
+    return activeDrain;
+  }
+  activeDrain = drainDigestQueueLoop().finally(() => {
+    activeDrain = null;
+  });
+  return activeDrain;
+}
+
+async function awaitDigestPipelineIdle(): Promise<void> {
+  while (digestQueue.digestQueueLength() > 0 || activeDrain !== null) {
+    await ensureDrainRunning();
+  }
+}
+
 function normalizeSettings(s: RecorderSettings | undefined): RecorderSettings {
   return {
     pollIntervalMs: Math.min(Math.max(Math.round(s?.pollIntervalMs ?? 500), 100), 5000),
     limitForceStopMb: Math.min(Math.max(s?.limitForceStopMb ?? 32, 8), 2048),
+    rawLimitMb: Math.min(Math.max(s?.rawLimitMb ?? 100, 8), 2048),
   };
 }
 
@@ -143,6 +192,10 @@ async function persistSettings(): Promise<void> {
 
 function limitBytes(): number {
   return recorderSettings.limitForceStopMb * 1024 * 1024;
+}
+
+function rawLimitBytes(): number {
+  return recorderSettings.rawLimitMb * 1024 * 1024;
 }
 
 function shouldBlockRecordingStart(processedBytes: number): boolean {
@@ -330,23 +383,17 @@ async function processDigest(digest: string): Promise<void> {
   );
   const snapshotId = crypto.randomUUID();
   await mergeTreeIntoGraphAndLedger(row.fullUrl, snapshotId, tree);
+  await deletePolledStagingByDigest(digest);
 }
 
-async function drainWorker(): Promise<void> {
-  while (digestQueue.digestQueueLength() > 0) {
-    const digest = digestQueue.popDigest();
-    if (!digest) {
-      break;
-    }
-    await processDigest(digest);
-  }
-}
-
-async function ingestCapture(payload: CapturePayload): Promise<void> {
+async function ingestCaptureInner(payload: CapturePayload): Promise<void> {
   if (!recorderState.isRecording) {
     return;
   }
   const digest = await sha256Hex(payload.outerHTML);
+  if (!recorderState.isRecording) {
+    return;
+  }
   const capturedAt = new Date().toISOString();
   const inserted = await tryPutPolledUnique({
     digest,
@@ -362,12 +409,19 @@ async function ingestCapture(payload: CapturePayload): Promise<void> {
     return;
   }
   digestQueue.pushDigest(digest);
-  await drainWorker();
+  await ensureDrainRunning();
   await refreshStorageEstimates();
-
-  if ((await estimateBytesStores23()) > limitBytes()) {
-    await stopRecordingSession(true);
+  const evicted = await evictRawUntilUnderBudget(rawLimitBytes());
+  for (const d of evicted) {
+    digestQueue.removeDigestIfPresent(d);
   }
+  if (evicted.length > 0) {
+    await refreshStorageEstimates();
+  }
+}
+
+async function ingestCapture(payload: CapturePayload): Promise<void> {
+  await runCaptureSerialized(() => ingestCaptureInner(payload));
 }
 
 async function broadcastToTab(
@@ -433,7 +487,8 @@ async function stopRecordingSession(forceLimit = false): Promise<void> {
     recorderState.forceStoppedForLimit = true;
   }
   await broadcastRecording(false);
-  await drainWorker();
+  await waitCapturePipelineIdle();
+  await awaitDigestPipelineIdle();
   digestQueue.clearDigestQueue();
   pendingRequestsById.clear();
   await clearPolledUniqueStore();
@@ -452,6 +507,7 @@ async function sessionStats(): Promise<SessionStats> {
     storageBytesRaw: raw,
     storageBytesProcessed: proc,
     storageBytesTotal: raw + proc,
+    digestQueueLength: digestQueue.digestQueueLength(),
   };
 }
 
@@ -483,6 +539,9 @@ chrome.runtime.onMessage.addListener(
             sender,
           );
           await ingestCapture(merged);
+          if (recorderState.isRecording && (await estimateBytesStores23()) > limitBytes()) {
+            await stopRecordingSession(true);
+          }
           sendResponse({ ok: true });
           return;
         }

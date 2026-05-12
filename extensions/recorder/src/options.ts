@@ -7,10 +7,11 @@ type BackgroundResponse<T = unknown> = {
 
 const pollIntervalEl = document.querySelector<HTMLInputElement>("#poll-interval");
 const limitForceStopMbEl = document.querySelector<HTMLInputElement>("#limit-force-stop-mb");
+const rawLimitMbEl = document.querySelector<HTMLInputElement>("#raw-limit-mb");
 const messageEl = document.querySelector<HTMLDivElement>("#message");
 
 function assertElements(): void {
-  if (!pollIntervalEl || !limitForceStopMbEl || !messageEl) {
+  if (!pollIntervalEl || !limitForceStopMbEl || !rawLimitMbEl || !messageEl) {
     throw new Error("Missing options DOM elements.");
   }
 }
@@ -32,14 +33,17 @@ async function sendMessage<T = unknown>(
 function renderSettings(settings: RecorderSettings): void {
   pollIntervalEl!.value = String(settings.pollIntervalMs);
   limitForceStopMbEl!.value = String(settings.limitForceStopMb);
+  rawLimitMbEl!.value = String(settings.rawLimitMb);
 }
 
 async function save(): Promise<void> {
   const pollIntervalMs = Math.round(Number(pollIntervalEl!.value));
   const limitForceStopMb = Math.round(Number(limitForceStopMbEl!.value));
+  const rawLimitMb = Math.round(Number(rawLimitMbEl!.value));
   const response = await sendMessage("UPDATE_SETTINGS", {
     pollIntervalMs,
     limitForceStopMb,
+    rawLimitMb,
   });
   if (!response.ok) {
     throw new Error(response.error ?? "Save failed.");
@@ -57,7 +61,7 @@ async function load(): Promise<void> {
 }
 
 function wire(): void {
-  for (const el of [pollIntervalEl, limitForceStopMbEl]) {
+  for (const el of [pollIntervalEl, limitForceStopMbEl, rawLimitMbEl]) {
     el!.addEventListener("change", () => {
       void save().catch((error) => {
         const message = error instanceof Error ? error.message : String(error);

@@ -68,10 +68,15 @@
           <span>Force stop when output ≥ (MB)</span>
           <input id="limit-force-stop-mb" type="number" min="8" max="2048" step="1" />
         </label>
+        <label class="row">
+          <span>Max raw staging while recording (MB)</span>
+          <input id="raw-limit-mb" type="number" min="8" max="2048" step="1" />
+        </label>
         <p class="hint">
           Force-stop uses output only (merged graphs + ledger + site metadata + request log). Raw
-          HTML is cleared on stop. Use Clear → Clear old in the popup to free about half of current
-          output, or Clear all for a full wipe.
+          HTML per capture is removed after processing; if staging still exceeds the raw cap, oldest
+          captures are evicted while recording. All raw staging is cleared on stop. Use Clear →
+          Clear old in the popup to free about half of current output, or Clear all for a full wipe.
         </p>
       </section>
       <div id="message"></div>

@@ -373,6 +373,61 @@ export async function tryPutPolledUnique(record: PolledUniqueRecord): Promise<bo
   return true;
 }
 
+async function listAllPollMetaRecords(): Promise<PolledMetaRecord[]> {
+  if (!hasIndexedDb()) {
+    return [...memory.polledMeta.values()];
+  }
+  const db = await openDb();
+  const tx = db.transaction(STORE_POLLED_META, "readonly");
+  const rows = await reqToPromise(
+    tx.objectStore(STORE_POLLED_META).getAll() as IDBRequest<PolledMetaRecord[]>,
+  );
+  await txDone(tx);
+  return rows;
+}
+
+function sortPollMetaOldestFirst(rows: PolledMetaRecord[]): PolledMetaRecord[] {
+  return [...rows].sort((a, b) => {
+    const c = a.capturedAt.localeCompare(b.capturedAt);
+    if (c !== 0) {
+      return c;
+    }
+    return a.digest.localeCompare(b.digest);
+  });
+}
+
+/** Remove raw HTML + poll meta for one digest (store 1 only). */
+export async function deletePolledStagingByDigest(digest: string): Promise<void> {
+  if (!hasIndexedDb()) {
+    memory.polledMeta.delete(digest);
+    memory.rawHtml.delete(digest);
+    return;
+  }
+  const db = await openDb();
+  const tx = db.transaction([STORE_POLLED_META, STORE_RAW_HTML], "readwrite");
+  tx.objectStore(STORE_POLLED_META).delete(digest);
+  tx.objectStore(STORE_RAW_HTML).delete(digest);
+  await txDone(tx);
+}
+
+/**
+ * Delete oldest staging rows until store 1 is at or below `limitBytes`.
+ * Returns digests removed (for queue hygiene in the caller).
+ */
+export async function evictRawUntilUnderBudget(limitBytes: number): Promise<string[]> {
+  const evicted: string[] = [];
+  while ((await estimateBytesStore1()) > limitBytes) {
+    const rows = sortPollMetaOldestFirst(await listAllPollMetaRecords());
+    if (rows.length === 0) {
+      break;
+    }
+    const digest = rows[0].digest;
+    await deletePolledStagingByDigest(digest);
+    evicted.push(digest);
+  }
+  return evicted;
+}
+
 export async function clearPolledUniqueStore(): Promise<void> {
   if (!hasIndexedDb()) {
     memory.polledMeta.clear();

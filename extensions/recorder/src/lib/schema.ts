@@ -24,6 +24,8 @@ export type RecorderSettings = {
   pollIntervalMs: number;
   /** Max bytes for stores 2+3 (output) before forcing stop. */
   limitForceStopMb: number;
+  /** Max bytes for store 1 (raw HTML + poll meta) while recording; oldest rows evicted when exceeded. */
+  rawLimitMb: number;
 };
 
 export type SessionStats = {
@@ -32,6 +34,8 @@ export type SessionStats = {
   storageBytesRaw: number;
   storageBytesProcessed: number;
   storageBytesTotal: number;
+  /** In-memory digest FIFO length (pending processing). */
+  digestQueueLength: number;
 };
 
 export type ExportMessage =

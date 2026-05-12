@@ -21,3 +21,12 @@ export function digestQueueLength(): number {
 export function peekDigestQueue(): readonly string[] {
   return [...fifo];
 }
+
+/** Remove every occurrence of `digestHex` from the FIFO (eviction / DB delete). */
+export function removeDigestIfPresent(digestHex: string): void {
+  for (let i = fifo.length - 1; i >= 0; i -= 1) {
+    if (fifo[i] === digestHex) {
+      fifo.splice(i, 1);
+    }
+  }
+}

@@ -56,6 +56,7 @@ function baseStats(): SessionStats {
     storageBytesRaw: 0,
     storageBytesProcessed: 512,
     storageBytesTotal: 512,
+    digestQueueLength: 0,
   };
 }
 
@@ -91,7 +92,7 @@ describe("popup", () => {
       if (type === "GET_SETTINGS") {
         return {
           ok: true,
-          settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
+          settings: { pollIntervalMs: 500, limitForceStopMb: 32, rawLimitMb: 100 },
         };
       }
       return { ok: true };
@@ -124,7 +125,7 @@ describe("popup", () => {
         if (type === "GET_SETTINGS") {
           return {
             ok: true,
-            settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
+            settings: { pollIntervalMs: 500, limitForceStopMb: 32, rawLimitMb: 100 },
           };
         }
         if (type === "STOP_RECORDING") {
@@ -162,7 +163,7 @@ describe("popup", () => {
         if (type === "GET_SETTINGS") {
           return {
             ok: true,
-            settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
+            settings: { pollIntervalMs: 500, limitForceStopMb: 32, rawLimitMb: 100 },
           };
         }
         if (type === "CLEAR_TRIM") {
@@ -209,7 +210,7 @@ describe("popup", () => {
       if (type === "GET_SETTINGS") {
         return {
           ok: true,
-          settings: { pollIntervalMs: 500, limitForceStopMb: 32 },
+          settings: { pollIntervalMs: 500, limitForceStopMb: 32, rawLimitMb: 100 },
         };
       }
       if (type === "GET_SESSION_STATS") {

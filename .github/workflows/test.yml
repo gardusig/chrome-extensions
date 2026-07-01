@@ -10,5 +10,5 @@ concurrency:
 
 jobs:
   pipeline:
-    uses: gardusig/pipelines/.github/workflows/ci/reusable-test.yml@main
+    uses: gardusig/pipelines/.github/workflows/reusable-ci-test.yml@main
     secrets: inherit

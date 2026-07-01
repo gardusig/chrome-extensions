@@ -10,5 +10,5 @@ concurrency:
 
 jobs:
   pipeline:
-    uses: gardusig/pipelines/.github/workflows/ci/reusable-deploy.yml@main
+    uses: gardusig/pipelines/.github/workflows/reusable-ci-deploy.yml@main
     secrets: inherit

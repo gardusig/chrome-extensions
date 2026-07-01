@@ -1,0 +1,17 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    uses: gardusig/cli/.github/workflows/reusable-deploy.yml@feat/workflow-e2e-gh-scripts-and-coverage
+    secrets: inherit

@@ -1,0 +1,14 @@
+name: test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    uses: gardusig/cli/.github/workflows/reusable-test.yml@feat/workflow-e2e-gh-scripts-and-coverage
+    secrets: inherit

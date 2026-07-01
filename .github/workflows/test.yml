@@ -1,3 +1,4 @@
+# Thin caller — copy to .github/workflows/test.yml in your app repo.
 name: test
 
 on:

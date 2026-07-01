@@ -1,3 +1,4 @@
+# Thin caller — copy to .github/workflows/deploy.yml in your app repo.
 name: deploy
 
 on:

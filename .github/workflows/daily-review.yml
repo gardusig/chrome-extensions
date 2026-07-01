@@ -1,0 +1,15 @@
+# Copy to .github/workflows/daily-review.yml — enable per repo in repos.yaml
+name: daily-review
+
+on:
+  schedule:
+    - cron: "0 14 * * *"  # 14:00 UTC daily — override per repo if needed
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  review:
+    uses: gardusig/pipelines/.github/workflows/reusable-daily-review.yml@main
+    secrets: inherit

@@ -1,0 +1,29 @@
+# Copy to .github/workflows/issue-closed.yml in your app repo
+name: issue-closed-sync
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: gardusig/pipelines
+          path: _pipelines
+
+      - name: Close sync pipeline
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          chmod +x _pipelines/bin/*.sh
+          _pipelines/bin/setup-cli.sh
+          _pipelines/bin/run-pipeline.sh issue/close-sync .

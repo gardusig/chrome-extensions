@@ -1,0 +1,18 @@
+# Copy to .github/workflows/pr-merged.yml — crafts next PR when a PR merges to main
+name: pr-merged
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  after-merge:
+    if: github.event.pull_request.merged == true
+    uses: gardusig/pipelines/.github/workflows/reusable-pr-after-merge.yml@main
+    secrets: inherit

@@ -10,5 +10,5 @@ concurrency:
 
 jobs:
   pipeline:
-    uses: gardusig/cli/.github/workflows/reusable-test.yml@feat/workflow-e2e-gh-scripts-and-coverage
+    uses: gardusig/pipelines/.github/workflows/ci/reusable-test.yml@main
     secrets: inherit

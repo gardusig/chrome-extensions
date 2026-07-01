@@ -1,0 +1,3 @@
+# Tag policy for gardusig-cli (`cli git tag`, `cli git deploy`).
+# Daily snapshot on each merge/push to main.
+pattern: date

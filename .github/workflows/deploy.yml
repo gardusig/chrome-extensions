@@ -1,0 +1,15 @@
+# Thin caller — copy to .github/workflows/deploy.yml in your app repo.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    uses: gardusig/pipelines/.github/workflows/reusable-ci-deploy.yml@main
+    secrets: inherit

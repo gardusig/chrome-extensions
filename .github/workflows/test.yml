@@ -1,0 +1,15 @@
+# Thin caller — copy to .github/workflows/test.yml in your app repo.
+name: test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    uses: gardusig/pipelines/.github/workflows/reusable-ci-test.yml@main
+    secrets: inherit

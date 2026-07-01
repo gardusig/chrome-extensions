@@ -1,0 +1,44 @@
+# Copy to .github/workflows/pr-checks-failed.yml in your app repo
+# Requires your test workflow to be named "test"
+name: pr-checks-failed
+
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  review-failed:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: gardusig/pipelines
+          path: _pipelines
+
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=$(gh pr list --repo "${{ github.repository }}" --state open \
+            --json number,headRefName \
+            --jq ".[] | select(.headRefName==\"${{ github.event.workflow_run.head_branch }}\") | .number" | head -1)
+          echo "number=${PR}" >> "$GITHUB_OUTPUT"
+
+      - name: Review failed checks
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          chmod +x _pipelines/bin/*.sh
+          _pipelines/bin/run-pipeline.sh pr/checks-failed .

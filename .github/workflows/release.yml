@@ -1,0 +1,14 @@
+# Thin caller — copy to .github/workflows/release.yml in your app repo.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    uses: gardusig/pipelines/.github/workflows/reusable-ci-release.yml@main
+    with:
+      publish_pypi: false
+    secrets: inherit
